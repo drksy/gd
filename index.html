@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black"/>
-<meta name="theme-color" content="#000000"/>
+<meta name="theme-color" content="#000"/>
 <title>GAMEDAY</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -16,11 +16,13 @@
 html,body,#root{height:100%;background:#000;color:#e8e8e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:#222;border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
 input,select,textarea{font-size:16px!important;font-family:inherit;color-scheme:dark}
+button{font-family:inherit}
 .spin{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pop{0%{transform:scale(.92);opacity:0}100%{transform:scale(1);opacity:1}}
-.pop{animation:pop .18s ease-out}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade{animation:fadeUp .18s ease-out}
 </style>
 </head>
 <body>
@@ -34,63 +36,75 @@ const db=supabase.createClient(SURL,SKEY);
 
 const BORDER="#1e1e1e",MUTED="#555",TEXT="#e8e8e8";
 
-// ── Teams ────────────────────────────────────────────────────────────
 const TEAMS=[
-  {id:"reds",    name:"Cincinnati Reds",          short:"Reds",      emoji:"⚾", color:"#C6011F", sport:"MLB"},
-  {id:"bengals", name:"Cincinnati Bengals",        short:"Bengals",   emoji:"🐯", color:"#FB4F14", sport:"NFL"},
-  {id:"fcc",     name:"FC Cincinnati",             short:"FCC",       emoji:"⚽", color:"#003087", sport:"MLS"},
-  {id:"bball",   name:"Bearcats Basketball",       short:"Bearcats",  emoji:"🏀", color:"#E00122", sport:"NCAAB"},
-  {id:"bfootball",name:"Bearcats Football",        short:"Bearcats",  emoji:"🏈", color:"#BE0000", sport:"NCAAF"},
+  {id:"reds",       name:"Cincinnati Reds",      short:"Reds",   emoji:"⚾",color:"#C6011F",sport:"MLB"},
+  {id:"bengals",    name:"Cincinnati Bengals",    short:"Bengals",emoji:"🐯",color:"#FB4F14",sport:"NFL"},
+  {id:"fcc",        name:"FC Cincinnati",         short:"FCC",    emoji:"⚽",color:"#003087",sport:"MLS"},
+  {id:"bball",      name:"Bearcats Basketball",   short:"BB",     emoji:"🏀",color:"#E00122",sport:"NCAAB"},
+  {id:"bfootball",  name:"Bearcats Football",     short:"BFB",    emoji:"🏈",color:"#BE0000",sport:"NCAAF"},
 ];
+const TMAP=Object.fromEntries(TEAMS.map(t=>[t.id,t]));
 
-// ── Gameday Phases ────────────────────────────────────────────────────
 const PHASES=[
-  {id:"week",  label:"WEEK AHEAD",  color:"#5E5CE6", icon:"📅",
-   keys:["7 DAYS BEFORE GD","6 DAYS BEFORE GD","5 DAYS BEFORE GD","4 DAYS BEFORE GD","3 DAYS BEFORE GD"]},
-  {id:"soon",  label:"COMING UP",   color:"#FF9F0A", icon:"⏰",
-   keys:["2 DAYS BEFORE GD","DAY BEFORE GD"]},
-  {id:"game",  label:"GAME DAY",    color:null,      icon:"🏟",
-   keys:["GAMEDAY"]},
-  {id:"post",  label:"POST GAME",   color:"#30D158", icon:"✅",
-   keys:["DAY AFTER GD","2 DAYS AFTER GD","3 DAYS AFTER GD","4 DAYS AFTER GD","5 DAYS AFTER GD","6 DAYS AFTER GD","7 DAYS AFTER GD"]},
+  {id:"week_ahead",label:"WEEK AHEAD",  icon:"📅",color:"#5E5CE6",desc:"7–2 days before"},
+  {id:"day_before",label:"DAY BEFORE",  icon:"⏰",color:"#FF9F0A",desc:"24 hrs out"},
+  {id:"morning",   label:"MORNING OF",  icon:"☀️",color:"#FFD60A",desc:"Game day morning"},
+  {id:"pregame",   label:"PRE-GAME",    icon:"🔥",color:"#FF6B00",desc:"Hours before"},
+  {id:"live",      label:"LIVE",        icon:"📡",color:"#30D158",desc:"During the game"},
+  {id:"postgame",  label:"POST-GAME",   icon:"✅",color:"#32ADE6",desc:"Right after final"},
+  {id:"day_after", label:"DAY AFTER",   icon:"📊",color:"#8E8EF0",desc:"Recap & wrap-up"},
 ];
+const PMAP=Object.fromEntries(PHASES.map(p=>[p.id,p]));
 
-const SCHED_KEY="gameday_sched_v1";
+const genId=()=>crypto.randomUUID();
+const todayStr=()=>{const et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));return et.toISOString().split("T")[0];};
+const fmtDate=(s,o={weekday:"short",month:"short",day:"numeric"})=>s?new Date(s+"T12:00:00").toLocaleDateString("en-US",o):"—";
+const fmtTime=t=>{if(!t)return"";const[h,m]=t.split(":");const hr=parseInt(h);return`${hr===0?12:hr>12?hr-12:hr}:${m} ${hr<12?"AM":"PM"}`;};
+const daysUntil=d=>{if(!d)return null;return Math.round((new Date(d+"T00:00:00")-new Date(todayStr()+"T00:00:00"))/86400000);};
 
-function genId(){return crypto.randomUUID();}
-function todayStr(){
-  const et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));
-  return et.toISOString().split("T")[0];
-}
-function fmtDateShort(s){
-  if(!s)return"—";
-  return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-}
-function fmtTime12(t){
-  if(!t)return"";
-  const[h,m]=t.split(":");const hr=parseInt(h);
-  return`${hr===0?12:hr>12?hr-12:hr}:${m} ${hr<12?"AM":"PM"}`;
-}
-function daysUntil(dateStr){
-  if(!dateStr)return null;
-  const today=new Date(todayStr()+"T00:00:00");
-  const d=new Date(dateStr+"T00:00:00");
-  return Math.round((d-today)/86400000);
+const INP={width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid #222",background:"#0d0d0d",color:TEXT,outline:"none"};
+const SEL={...INP,cursor:"pointer"};
+const LBL={display:"block",fontSize:10,fontWeight:700,color:MUTED,letterSpacing:1,textTransform:"uppercase",marginBottom:5};
+
+function Spinner({size=20,color="#FF6B00"}){return <div className="spin" style={{width:size,height:size,border:"2px solid #1a1a1a",borderTopColor:color,borderRadius:"50%",flexShrink:0}}/>;}
+
+function BackBtn({onClick}){
+  return(
+    <button onClick={onClick} style={{background:"none",border:"none",color:MUTED,cursor:"pointer",display:"flex",alignItems:"center",gap:5,padding:"0 8px 0 0",fontSize:13,fontWeight:600}}>
+      <span style={{fontSize:20,lineHeight:1}}>‹</span>Back
+    </button>
+  );
 }
 
-// ── Schedule helpers ──────────────────────────────────────────────────
-function loadSched(){try{return JSON.parse(localStorage.getItem(SCHED_KEY)||"{}");}catch{return {};}}
-function saveSched(s){localStorage.setItem(SCHED_KEY,JSON.stringify(s));}
-function nextGame(teamId){
-  const sched=loadSched();
-  const games=(sched[teamId]||[]).filter(g=>g.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date));
-  return games[0]||null;
+function BottomModal({onClose,children,maxW=480}){
+  return(
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",backdropFilter:"blur(8px)",zIndex:600,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div className="fade" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:maxW,maxHeight:"92vh",overflowY:"auto",border:"1px solid #222",borderBottom:"none",paddingBottom:"env(safe-area-inset-bottom,12px)"}}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────
+function ConfirmDel({msg,onConfirm,onCancel}){
+  return(
+    <BottomModal onClose={onCancel}>
+      <div style={{padding:"24px 20px"}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>{msg}</div>
+        <div style={{fontSize:12,color:MUTED,marginBottom:16}}>This cannot be undone.</div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel} style={{flex:1,padding:11,borderRadius:9,border:"1px solid #222",background:"transparent",color:MUTED,cursor:"pointer",fontSize:13}}>Cancel</button>
+          <button onClick={onConfirm} style={{flex:1,padding:11,borderRadius:9,border:"none",background:"#FF453A",color:"#fff",fontWeight:800,cursor:"pointer",fontSize:13}}>Delete</button>
+        </div>
+      </div>
+    </BottomModal>
+  );
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────
 function AuthScreen({onAuth}){
-  const [email,setEmail]=useState(""),[pw,setPw]=useState(""),[loading,setLoading]=useState(false),[err,setErr]=useState("");
-  const B="#111",BD="1px solid #222";
+  const[email,setEmail]=useState(""),[pw,setPw]=useState(""),[loading,setLoading]=useState(false),[err,setErr]=useState("");
   async function go(){
     if(!email||!pw){setErr("Required");return;}
     setLoading(true);setErr("");
@@ -99,95 +113,168 @@ function AuthScreen({onAuth}){
     onAuth(data.user);
   }
   return(
-    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",padding:24,background:"#000"}}>
+    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{width:"100%",maxWidth:340}}>
-        <div style={{marginBottom:32,textAlign:"center"}}>
-          <div style={{fontSize:28,fontWeight:900,letterSpacing:-1}}>GAMEDAY</div>
-          <div style={{fontSize:10,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:4}}>Command Center</div>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{fontSize:32,fontWeight:900,letterSpacing:-2}}>GAMEDAY</div>
+          <div style={{fontSize:9,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:5}}>Command Center</div>
         </div>
-        {["Email","Password"].map((lbl,i)=>(
-          <div key={lbl} style={{marginBottom:12}}>
-            <div style={{fontSize:10,fontWeight:700,color:MUTED,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{lbl}</div>
-            <input type={i===1?"password":"email"} value={i===0?email:pw} onChange={e=>i===0?setEmail(e.target.value):setPw(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&go()} placeholder={i===0?"you@example.com":"••••••••"}
-              style={{width:"100%",padding:"10px 12px",borderRadius:8,border:BD,background:B,color:TEXT,outline:"none"}} autoCapitalize="none"/>
-          </div>
-        ))}
-        {err&&<div style={{fontSize:12,color:"#FF453A",marginBottom:12,padding:"8px 12px",borderRadius:8,background:"#1a0a0a"}}>{err}</div>}
-        <button onClick={go} disabled={loading} style={{width:"100%",padding:13,borderRadius:10,border:"none",background:loading?"#222":"#FF6B00",color:loading?MUTED:"#000",fontWeight:800,fontSize:14,fontFamily:"inherit",cursor:loading?"default":"pointer"}}>
-          {loading?"…":"Sign In"}
+        <label style={LBL}>Email</label>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="you@example.com" style={{...INP,marginBottom:14}} autoCapitalize="none"/>
+        <label style={LBL}>Password</label>
+        <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="••••••••" style={{...INP,marginBottom:18}}/>
+        {err&&<div style={{fontSize:12,color:"#FF453A",marginBottom:14,padding:"8px 12px",borderRadius:8,background:"#1a0a0a"}}>{err}</div>}
+        <button onClick={go} disabled={loading} style={{width:"100%",padding:13,borderRadius:10,border:"none",background:loading?"#222":"#FF6B00",color:loading?MUTED:"#000",fontWeight:900,fontSize:14,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          {loading&&<Spinner size={16} color="#555"/>}{loading?"…":"Sign In"}
         </button>
       </div>
     </div>
   );
 }
 
-// ── Data loader ───────────────────────────────────────────────────────
-async function loadAllData(userId){
-  const{data:mem}=await db.from("board_members").select("board_id,boards(id,name)").eq("user_id",userId);
-  const boards=(mem||[]).map(m=>m.boards).filter(Boolean);
-  const boardIds=boards.map(b=>b.id);
-  if(!boardIds.length)return{tasks:[],brands:[]};
-
-  const[taskRes,settingsRes]=await Promise.all([
-    db.from("tasks").select("id,title,notes,link,brand,gameday,done,status,time").in("board_id",boardIds).not("gameday","is",null).neq("gameday",""),
-    db.from("board_settings").select("brands_json").in("board_id",boardIds),
-  ]);
-
-  const tasks=(taskRes.data||[]).filter(t=>t.gameday&&t.gameday.trim());
-
-  // Merge brands from all boards
-  const brandMap={};
-  (settingsRes.data||[]).forEach(s=>{
-    if(!s.brands_json)return;
-    try{
-      const arr=JSON.parse(s.brands_json);
-      arr.forEach(b=>{if(b.label)brandMap[b.label]=b;});
-    }catch{}
-  });
-  const brands=Object.values(brandMap);
-
-  return{tasks,brands};
-}
-
-// ── Task Card ─────────────────────────────────────────────────────────
-function TaskCard({task,brandMeta,teamName,onEdit,accent}){
-  const[expanded,setExpanded]=useState(false);
-  const bm=brandMeta;
-  const hasLink=task.link&&task.link.trim();
-  const hasNotes=task.notes&&task.notes.trim();
-  const searchQ=encodeURIComponent(`${teamName} ${task.title}`);
-
+// ── Game Form ──────────────────────────────────────────────────────────
+function GameForm({game,teamId,teamColor,userId,onSave,onClose}){
+  const[f,setF]=useState({game_date:game?.game_date||"",game_time:game?.game_time?.slice(0,5)||"",opponent:game?.opponent||"",location:game?.location||"home",notes:game?.notes||""});
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  const[saving,setSaving]=useState(false);
+  async function save(){
+    if(!f.game_date)return;
+    setSaving(true);
+    const p={user_id:userId,team_id:teamId,game_date:f.game_date,game_time:f.game_time||null,opponent:f.opponent||null,location:f.location,notes:f.notes||null};
+    if(game)await db.from("gd_games").update(p).eq("id",game.id);
+    else await db.from("gd_games").insert({...p,id:genId()});
+    setSaving(false);onSave();
+  }
   return(
-    <div className="pop" style={{background:"#0d0d0d",border:`1px solid ${BORDER}`,borderRadius:12,marginBottom:6,overflow:"hidden",borderLeft:accent?`3px solid ${accent}`:`3px solid #222`}}>
-      <div style={{padding:"11px 14px",display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}} onClick={()=>setExpanded(x=>!x)}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:14,fontWeight:600,color:TEXT,lineHeight:1.35,marginBottom:4}}>{task.title||"Untitled"}</div>
-          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-            {task.brand&&<span style={{fontSize:10,background:accent?accent+"22":"#222",color:accent||MUTED,borderRadius:5,padding:"2px 7px",fontWeight:700,letterSpacing:.3}}>{bm?.emoji||""} {task.brand}</span>}
-            {task.time&&<span style={{fontSize:10,color:"#5E5CE6",fontWeight:600}}>🕐 {fmtTime12(task.time)}</span>}
-          </div>
+    <BottomModal onClose={onClose}>
+      <div style={{padding:"18px 18px 0",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{fontWeight:800,fontSize:15,color:teamColor}}>{game?"Edit Game":"Add Game"}</div>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:MUTED}}>✕</button>
+      </div>
+      <div style={{padding:"0 18px 20px",display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><label style={LBL}>Date *</label><input type="date" value={f.game_date} onChange={e=>set("game_date",e.target.value)} style={{...INP,colorScheme:"dark"}}/></div>
+          <div><label style={LBL}>Time</label><input type="time" value={f.game_time} onChange={e=>set("game_time",e.target.value)} style={{...INP,colorScheme:"dark"}}/></div>
         </div>
-        <div style={{display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-          {hasLink&&<a href={task.link} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
-            style={{fontSize:11,padding:"5px 9px",borderRadius:7,border:"1px solid #5E5CE644",background:"#0a0a1a",color:"#5E5CE6",textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}>📋 Template</a>}
-          <a href={`https://www.google.com/search?q=${searchQ}`} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
-            style={{fontSize:11,padding:"5px 9px",borderRadius:7,border:"1px solid #333",background:"#111",color:MUTED,textDecoration:"none",fontWeight:700}}>🔍</a>
-          <span style={{fontSize:12,color:"#333",marginLeft:2}}>{expanded?"▲":"▼"}</span>
+        <div><label style={LBL}>Opponent</label><input value={f.opponent} onChange={e=>set("opponent",e.target.value)} placeholder="e.g. Pittsburgh Pirates" style={INP}/></div>
+        <div><label style={LBL}>Location</label>
+          <select value={f.location} onChange={e=>set("location",e.target.value)} style={SEL}>
+            <option value="home">🏠 Home</option><option value="away">✈️ Away</option><option value="neutral">⚪ Neutral</option>
+          </select>
+        </div>
+        <div><label style={LBL}>Notes</label><input value={f.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional…" style={INP}/></div>
+        <div style={{display:"flex",gap:8,paddingTop:4}}>
+          <button onClick={onClose} style={{flex:1,padding:11,borderRadius:9,border:"1px solid #222",background:"transparent",color:MUTED,cursor:"pointer",fontSize:13}}>Cancel</button>
+          <button onClick={save} disabled={saving||!f.game_date} style={{flex:2,padding:11,borderRadius:9,border:"none",background:f.game_date?teamColor:"#222",color:f.game_date?"#fff":MUTED,fontWeight:800,cursor:f.game_date?"pointer":"default",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {saving&&<Spinner size={14} color="#fff"/>}{saving?"Saving…":"Save Game"}
+          </button>
         </div>
       </div>
-      {expanded&&(
-        <div style={{padding:"0 14px 12px",borderTop:`1px solid ${BORDER}`}}>
-          {hasNotes&&<div style={{fontSize:12,color:"#aaa",lineHeight:1.6,marginTop:10,whiteSpace:"pre-wrap"}}>{task.notes}</div>}
+    </BottomModal>
+  );
+}
+
+// ── Task Form ──────────────────────────────────────────────────────────
+function TaskForm({task,teamId,brands,userId,onSave,onClose}){
+  const[f,setF]=useState({team_id:task?.team_id||teamId||"all",phase:task?.phase||"pregame",brand:task?.brand||"",title:task?.title||"",body_notes:task?.body_notes||"",template_link:task?.template_link||"",search_hint:task?.search_hint||""});
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  const[saving,setSaving]=useState(false);
+  const ph=PMAP[f.phase];
+  async function save(){
+    if(!f.title.trim())return;
+    setSaving(true);
+    const p={user_id:userId,team_id:f.team_id,phase:f.phase,brand:f.brand||null,title:f.title.trim(),body_notes:f.body_notes||null,template_link:f.template_link||null,search_hint:f.search_hint||null,sort_order:0,active:true};
+    if(task)await db.from("gd_tasks").update(p).eq("id",task.id);
+    else await db.from("gd_tasks").insert({...p,id:genId()});
+    setSaving(false);onSave();
+  }
+  return(
+    <BottomModal onClose={onClose}>
+      <div style={{padding:"18px 18px 0",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{fontWeight:800,fontSize:15,color:ph?.color||TEXT}}>{task?"Edit Task":"New Content Task"}</div>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:MUTED}}>✕</button>
+      </div>
+      <div style={{padding:"0 18px 20px",display:"flex",flexDirection:"column",gap:12}}>
+        <div><label style={LBL}>Title *</label><input autoFocus value={f.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Post hype graphic" style={INP}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><label style={LBL}>Team</label>
+            <select value={f.team_id} onChange={e=>set("team_id",e.target.value)} style={SEL}>
+              <option value="all">🌐 All Teams</option>
+              {TEAMS.map(t=><option key={t.id} value={t.id}>{t.emoji} {t.short}</option>)}
+            </select>
+          </div>
+          <div><label style={LBL}>Phase</label>
+            <select value={f.phase} onChange={e=>set("phase",e.target.value)} style={SEL}>
+              {PHASES.map(p=><option key={p.id} value={p.id}>{p.icon} {p.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div><label style={LBL}>Brand</label>
+          <select value={f.brand} onChange={e=>set("brand",e.target.value)} style={SEL}>
+            <option value="">— Any Brand —</option>
+            {brands.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        <div><label style={LBL}>Content / Copy / Caption</label><textarea value={f.body_notes} onChange={e=>set("body_notes",e.target.value)} placeholder="Caption, hashtags, talking points…" rows={3} style={{...INP,resize:"vertical"}}/></div>
+        <div><label style={LBL}>Template Link</label><input value={f.template_link} onChange={e=>set("template_link",e.target.value)} placeholder="https://canva.com/…" style={INP}/></div>
+        <div><label style={LBL}>Search Hint</label><input value={f.search_hint} onChange={e=>set("search_hint",e.target.value)} placeholder="e.g. score graphic highlight reel" style={INP}/></div>
+        <div style={{display:"flex",gap:8,paddingTop:4}}>
+          <button onClick={onClose} style={{flex:1,padding:11,borderRadius:9,border:"1px solid #222",background:"transparent",color:MUTED,cursor:"pointer",fontSize:13}}>Cancel</button>
+          <button onClick={save} disabled={saving||!f.title.trim()} style={{flex:2,padding:11,borderRadius:9,border:"none",background:f.title.trim()?(ph?.color||"#FF6B00"):"#222",color:f.title.trim()?"#fff":MUTED,fontWeight:800,cursor:f.title.trim()?"pointer":"default",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {saving&&<Spinner size={14} color="#fff"/>}{saving?"Saving…":"Save Task"}
+          </button>
+        </div>
+      </div>
+    </BottomModal>
+  );
+}
+
+// ── Content Card ───────────────────────────────────────────────────────
+function ContentCard({task,done,onToggle,onEdit,onDelete,teamName}){
+  const[open,setOpen]=useState(false);
+  const ph=PMAP[task.phase];
+  const accent=ph?.color||"#FF6B00";
+  const team=task.team_id!=="all"?TMAP[task.team_id]:null;
+  const sq=encodeURIComponent(`${teamName} ${task.search_hint||task.title}`);
+  return(
+    <div className="fade" style={{background:done?"#080808":"#0d0d0d",border:`1px solid ${done?"#161616":BORDER}`,borderLeft:`3px solid ${done?"#1e1e1e":accent}`,borderRadius:11,marginBottom:5,overflow:"hidden",opacity:done?.6:1,transition:"opacity .2s"}}>
+      <div style={{padding:"10px 12px",display:"flex",alignItems:"flex-start",gap:10}}>
+        <button onClick={()=>onToggle(!done)} style={{width:20,height:20,borderRadius:5,border:`1.5px solid ${done?"#30D158":BORDER}`,background:done?"#30D158":"transparent",cursor:"pointer",flexShrink:0,marginTop:2,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+          {done&&<span style={{fontSize:10,color:"#000",fontWeight:900,lineHeight:1}}>✓</span>}
+        </button>
+        <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
+          <div style={{fontSize:13,fontWeight:600,color:done?MUTED:TEXT,textDecoration:done?"line-through":"none",lineHeight:1.35}}>{task.title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4,flexWrap:"wrap"}}>
+            {task.brand&&<span style={{fontSize:9,background:"#1a1a1a",color:"#999",borderRadius:5,padding:"2px 7px",fontWeight:700,letterSpacing:.3}}>{task.brand}</span>}
+            {team&&<span style={{fontSize:9,background:team.color+"1a",color:team.color,borderRadius:5,padding:"2px 7px",fontWeight:700}}>{team.emoji} {team.short}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
+          {task.template_link&&(
+            <a href={task.template_link} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
+              style={{fontSize:10,padding:"5px 8px",borderRadius:7,border:"1px solid #5E5CE644",background:"#0a0a1a",color:"#5E5CE6",textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}>📋</a>
+          )}
+          <a href={`https://www.google.com/search?q=${sq}`} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
+            style={{padding:"5px 8px",borderRadius:7,border:`1px solid ${BORDER}`,background:"#111",color:MUTED,textDecoration:"none",fontSize:11}}>🔍</a>
+          <span style={{fontSize:10,color:"#333",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>{open?"▲":"▼"}</span>
+        </div>
+      </div>
+      {open&&(
+        <div style={{padding:"0 12px 12px",borderTop:`1px solid ${BORDER}`}}>
+          {task.body_notes&&<div style={{fontSize:12,color:"#bbb",lineHeight:1.65,marginTop:10,whiteSpace:"pre-wrap",fontFamily:"inherit"}}>{task.body_notes}</div>}
           <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-            <a href={`https://www.youtube.com/results?search_query=${searchQ}`} target="_blank" rel="noopener"
+            <a href={`https://www.youtube.com/results?search_query=${sq}`} target="_blank" rel="noopener"
               style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #FF000033",background:"#1a0000",color:"#FF4444",textDecoration:"none",fontWeight:600}}>▶ YouTube</a>
             <a href={`https://x.com/search?q=${encodeURIComponent(teamName)}`} target="_blank" rel="noopener"
               style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #1d9bf033",background:"#001a2a",color:"#1d9bf0",textDecoration:"none",fontWeight:600}}>𝕏 Search</a>
             <a href={`https://www.instagram.com/explore/tags/${encodeURIComponent(teamName.replace(/\s/g,""))}/`} target="_blank" rel="noopener"
-              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #E1306C33",background:"#1a001a",color:"#E1306C",textDecoration:"none",fontWeight:600}}>📸 IG</a>
-            <button onClick={()=>navigator.clipboard?.writeText(task.notes||task.title)}
-              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #333",background:"transparent",color:MUTED,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>📋 Copy</button>
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #E1306C33",background:"#1a0010",color:"#E1306C",textDecoration:"none",fontWeight:600}}>📸 IG</a>
+            {task.body_notes&&<button onClick={()=>navigator.clipboard?.writeText(task.body_notes)}
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:`1px solid ${BORDER}`,background:"transparent",color:MUTED,cursor:"pointer",fontWeight:600}}>📋 Copy</button>}
+            <button onClick={()=>onEdit(task)}
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:`1px solid ${BORDER}`,background:"transparent",color:MUTED,cursor:"pointer",fontWeight:600}}>✏️ Edit</button>
+            <button onClick={()=>onDelete(task)}
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #FF453A33",background:"transparent",color:"#FF453A88",cursor:"pointer",fontWeight:600}}>🗑</button>
           </div>
         </div>
       )}
@@ -195,419 +282,588 @@ function TaskCard({task,brandMeta,teamName,onEdit,accent}){
   );
 }
 
-// ── Phase Section ─────────────────────────────────────────────────────
-function PhaseSection({phase,tasks,brands,teamName,teamColor,defaultOpen=false}){
-  const[open,setOpen]=useState(defaultOpen);
-  const color=phase.color||teamColor;
-  if(!tasks.length)return null;
+// ── Command Center ─────────────────────────────────────────────────────
+function CommandCenter({game,team,userId,brands,onBack}){
+  const[tasks,setTasks]=useState([]);
+  const[comps,setComps]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[brandTab,setBrandTab]=useState("all");
+  const[phaseTab,setPhaseTab]=useState("all");
+  const[editTask,setEditTask]=useState(null);
+  const[showAdd,setShowAdd]=useState(false);
+  const[delTask,setDelTask]=useState(null);
+  const[q,setQ]=useState("");
+  const[showQ,setShowQ]=useState(false);
+  const accent=team.color;
+  const du=daysUntil(game.game_date);
 
-  const brandMeta=t=>{
-    if(!t.brand)return null;
-    return brands.find(b=>b.label===t.brand)||null;
+  const load=async()=>{
+    setLoading(true);
+    const[tR,cR]=await Promise.all([
+      db.from("gd_tasks").select("*").eq("user_id",userId).in("team_id",[team.id,"all"]).eq("active",true).order("sort_order").order("created_at"),
+      db.from("gd_completions").select("*").eq("user_id",userId).eq("game_id",game.id),
+    ]);
+    setTasks(tR.data||[]);
+    const cm={};(cR.data||[]).forEach(c=>{cm[c.task_id]={done:c.done,id:c.id};});
+    setComps(cm);setLoading(false);
+  };
+  useEffect(()=>{load();},[game.id]);
+
+  const toggleDone=async(task,done)=>{
+    const ex=comps[task.id];
+    const upd={done,done_at:done?new Date().toISOString():null};
+    if(ex){await db.from("gd_completions").update(upd).eq("id",ex.id);}
+    else{const nr={id:genId(),user_id:userId,game_id:game.id,task_id:task.id,...upd};await db.from("gd_completions").insert(nr);}
+    setComps(c=>({...c,[task.id]:{done,id:ex?.id||""}}));
   };
 
-  // Group by gameday key within this phase
-  const byKey={};
-  tasks.forEach(t=>{
-    const k=t.gameday;
-    if(!byKey[k])byKey[k]=[];
-    byKey[k].push(t);
-  });
-  const orderedKeys=phase.keys.filter(k=>byKey[k]);
+  const usedBrands=useMemo(()=>[...new Set(tasks.map(t=>t.brand).filter(Boolean))].sort(),[tasks]);
+
+  const filtered=useMemo(()=>{
+    let t=tasks;
+    if(brandTab!=="all")t=t.filter(x=>x.brand===brandTab);
+    if(phaseTab!=="all")t=t.filter(x=>x.phase===phaseTab);
+    if(q.trim())t=t.filter(x=>(x.title||"").toLowerCase().includes(q.toLowerCase())||(x.body_notes||"").toLowerCase().includes(q.toLowerCase()));
+    return t;
+  },[tasks,brandTab,phaseTab,q]);
+
+  const byPhase=useMemo(()=>{const m={};PHASES.forEach(p=>{m[p.id]=filtered.filter(t=>t.phase===p.id);});return m;},[filtered]);
+  const doneC=Object.values(comps).filter(c=>c.done).length;
+  const pct=tasks.length?Math.round(doneC/tasks.length*100):0;
+
+  const gameLabel=du===0?"GAME DAY 🔴":du===1?"TOMORROW":du!==null&&du>1?`IN ${du} DAYS`:du!==null&&du<0?`${Math.abs(du)}d AGO`:"";
 
   return(
-    <div style={{marginBottom:16}}>
-      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,marginBottom:open?10:0,cursor:"pointer",userSelect:"none",padding:"4px 0"}}>
-        <span style={{fontSize:14}}>{phase.icon}</span>
-        <span style={{fontSize:11,fontWeight:800,color,letterSpacing:1.2,textTransform:"uppercase"}}>{phase.label}</span>
-        <div style={{flex:1,height:1,background:color+"33"}}/>
-        <span style={{fontSize:11,color,background:color+"22",borderRadius:99,padding:"2px 8px",fontWeight:700}}>{tasks.length}</span>
-        <span style={{fontSize:11,color:"#333",marginLeft:2}}>{open?"▲":"▼"}</span>
-      </div>
-      {open&&(
-        <div>
-          {orderedKeys.map(k=>(
-            <div key={k}>
-              {orderedKeys.length>1&&<div style={{fontSize:9,fontWeight:700,color:"#333",letterSpacing:1.2,textTransform:"uppercase",padding:"6px 0 4px",marginTop:4}}>{k}</div>}
-              {byKey[k].map(t=><TaskCard key={t.id} task={t} brandMeta={brandMeta(t)} teamName={teamName} accent={brandMeta(t)?null:color} onEdit={()=>{}}/>)}
-            </div>
-          ))}
+    <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
+      <div style={{background:"#000",borderBottom:`1px solid ${BORDER}`,flexShrink:0}}>
+        {/* Top bar */}
+        <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
+          <BackBtn onClick={onBack}/>
+          <span style={{fontSize:22,lineHeight:1}}>{team.emoji}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:900,fontSize:15,color:accent,letterSpacing:-.5}}>{team.name}</div>
+            <div style={{fontSize:10,color:MUTED}}>{fmtDate(game.game_date,{weekday:"long",month:"long",day:"numeric"})}</div>
+          </div>
+          <button onClick={()=>setShowQ(s=>!s)} style={{background:showQ?"#111":"none",border:`1px solid ${showQ?accent:BORDER}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",color:showQ?accent:MUTED,fontSize:13}}>🔍</button>
+          <button onClick={()=>setShowAdd(true)} style={{background:accent,border:"none",borderRadius:8,padding:"6px 13px",cursor:"pointer",color:"#fff",fontSize:13,fontWeight:800}}>+ Task</button>
         </div>
-      )}
+
+        {/* Game info */}
+        <div style={{padding:"8px 16px 10px",background:accent+"0d",borderTop:`1px solid ${accent}1a`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:12,fontWeight:800,color:du===0?"#30D158":du===1?"#FF9F0A":TEXT}}>{gameLabel}</span>
+          {game.opponent&&<span style={{fontSize:11,color:MUTED}}>vs {game.opponent}</span>}
+          {game.game_time&&<span style={{fontSize:11,color:MUTED}}>🕐 {fmtTime(game.game_time)}</span>}
+          <span style={{fontSize:11,color:MUTED}}>{game.location==="home"?"🏠 Home":game.location==="away"?"✈️ Away":"⚪ Neutral"}</span>
+          <div style={{flex:1}}/>
+          {/* Progress */}
+          <div style={{display:"flex",alignItems:"center",gap:7}}>
+            <div style={{width:64,height:4,borderRadius:2,background:"#1a1a1a",overflow:"hidden"}}>
+              <div style={{width:pct+"%",height:"100%",background:pct===100?"#30D158":"#FF6B00",transition:"width .3s,background .3s"}}/>
+            </div>
+            <span style={{fontSize:10,color:pct===100?"#30D158":MUTED,fontWeight:pct===100?700:400}}>{doneC}/{tasks.length}</span>
+          </div>
+        </div>
+
+        {/* Search */}
+        {showQ&&(
+          <div style={{padding:"0 16px 10px"}}>
+            <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search content…" style={{...INP,border:`1px solid ${accent}44`}}/>
+          </div>
+        )}
+
+        {/* Filters */}
+        <div style={{overflowX:"auto",scrollbarWidth:"none",borderTop:`1px solid ${BORDER}`}}>
+          <div style={{display:"flex",padding:"0 8px",minWidth:"max-content"}}>
+            {/* Brand tabs */}
+            {["all",...usedBrands].map(b=>{
+              const active=brandTab===b;
+              return(
+                <button key={b} onClick={()=>setBrandTab(b)}
+                  style={{padding:"9px 12px",border:"none",borderBottom:active?`2px solid ${accent}`:"2px solid transparent",background:"none",color:active?accent:MUTED,fontSize:11,fontWeight:active?700:400,cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s"}}>
+                  {b==="all"?"ALL":b}
+                </button>
+              );
+            })}
+            {usedBrands.length>0&&<div style={{width:1,background:BORDER,margin:"8px 4px",flexShrink:0}}/>}
+            {/* Phase tabs */}
+            {["all",...PHASES.map(p=>p.id)].map(pid=>{
+              const ph=PMAP[pid];
+              const active=phaseTab===pid;
+              const cnt=pid==="all"?filtered.length:(byPhase[pid]||[]).length;
+              if(pid!=="all"&&!cnt)return null;
+              return(
+                <button key={pid} onClick={()=>setPhaseTab(pid)}
+                  style={{padding:"9px 12px",border:"none",borderBottom:active?`2px solid ${ph?.color||accent}`:"2px solid transparent",background:"none",color:active?(ph?.color||accent):MUTED,fontSize:11,fontWeight:active?700:400,cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s"}}>
+                  {ph?ph.icon+" "+ph.label:"ALL PHASES"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Content list */}
+      <div style={{flex:1,overflowY:"auto",padding:"12px 16px 40px"}}>
+        {loading&&<div style={{display:"flex",justifyContent:"center",padding:48}}><Spinner color={accent}/></div>}
+        {!loading&&filtered.length===0&&(
+          <div style={{textAlign:"center",padding:"64px 0",color:"#222",fontSize:13}}>
+            <div style={{fontSize:32,marginBottom:10}}>{team.emoji}</div>
+            {tasks.length===0?"No content tasks yet — tap + Task to add your first":"Nothing matches this filter"}
+          </div>
+        )}
+        {!loading&&phaseTab==="all"
+          ?PHASES.map(ph=>{
+              const items=byPhase[ph.id]||[];if(!items.length)return null;
+              const pd=items.filter(t=>comps[t.id]?.done).length;
+              return(
+                <div key={ph.id} style={{marginBottom:20}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,padding:"2px 0"}}>
+                    <span style={{fontSize:14}}>{ph.icon}</span>
+                    <span style={{fontSize:10,fontWeight:800,color:ph.color,letterSpacing:1.2,textTransform:"uppercase"}}>{ph.label}</span>
+                    <span style={{fontSize:9,color:MUTED,fontStyle:"italic"}}>{ph.desc}</span>
+                    <div style={{flex:1,height:1,background:ph.color+"22",marginLeft:4}}/>
+                    <span style={{fontSize:10,color:pd===items.length&&items.length>0?"#30D158":ph.color,fontWeight:700}}>{pd}/{items.length}</span>
+                  </div>
+                  {items.map(t=><ContentCard key={t.id} task={t} done={!!comps[t.id]?.done} onToggle={v=>toggleDone(t,v)} onEdit={t=>setEditTask(t)} onDelete={t=>setDelTask(t)} teamName={team.name}/>)}
+                </div>
+              );
+            })
+          :filtered.map(t=><ContentCard key={t.id} task={t} done={!!comps[t.id]?.done} onToggle={v=>toggleDone(t,v)} onEdit={t=>setEditTask(t)} onDelete={t=>setDelTask(t)} teamName={team.name}/>)
+        }
+      </div>
+
+      {showAdd&&<TaskForm userId={userId} teamId={team.id} brands={brands} onSave={()=>{setShowAdd(false);load();}} onClose={()=>setShowAdd(false)}/>}
+      {editTask&&<TaskForm task={editTask} userId={userId} brands={brands} onSave={()=>{setEditTask(null);load();}} onClose={()=>setEditTask(null)}/>}
+      {delTask&&<ConfirmDel msg={`Delete "${delTask.title}"?`} onConfirm={async()=>{await db.from("gd_tasks").update({active:false}).eq("id",delTask.id);setDelTask(null);load();}} onCancel={()=>setDelTask(null)}/>}
     </div>
   );
 }
 
-// ── Command Center ────────────────────────────────────────────────────
-function CommandCenter({team,game,allTasks,brands,onBack}){
-  const[activeBrand,setActiveBrand]=useState("all");
-  const[q,setQ]=useState("");
-  const[showSearch,setShowSearch]=useState(false);
-
+// ── Team Screen ────────────────────────────────────────────────────────
+function TeamScreen({team,userId,brands,onGo,onBack}){
+  const[games,setGames]=useState([]);
+  const[taskCounts,setTaskCounts]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[showAdd,setShowAdd]=useState(false);
+  const[editGame,setEditGame]=useState(null);
+  const[delGame,setDelGame]=useState(null);
+  const[tab,setTab]=useState("upcoming");
   const accent=team.color;
-  const du=game?daysUntil(game.date):null;
-  const gameLabel=game?(du===0?"TODAY":du===1?"TOMORROW":du!==null?`IN ${du} DAYS`:fmtDateShort(game.date)):"No game scheduled";
+  const today=todayStr();
 
-  // Filter tasks
-  const filtered=useMemo(()=>{
-    let t=allTasks;
-    if(activeBrand!=="all")t=t.filter(x=>x.brand===activeBrand);
-    if(q.trim())t=t.filter(x=>(x.title||"").toLowerCase().includes(q.toLowerCase())||(x.notes||"").toLowerCase().includes(q.toLowerCase()));
-    return t;
-  },[allTasks,activeBrand,q]);
+  const load=async()=>{
+    setLoading(true);
+    const[gR,tR]=await Promise.all([
+      db.from("gd_games").select("*").eq("user_id",userId).eq("team_id",team.id).order("game_date").order("game_time"),
+      db.from("gd_tasks").select("id,phase").eq("user_id",userId).in("team_id",[team.id,"all"]).eq("active",true),
+    ]);
+    setGames(gR.data||[]);
+    // Total content tasks for this team
+    const counts={total:(tR.data||[]).length};
+    PHASES.forEach(p=>{counts[p.id]=(tR.data||[]).filter(t=>t.phase===p.id).length;});
+    setTaskCounts(counts);
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[team.id]);
 
-  // Unique brands in these tasks
-  const usedBrands=useMemo(()=>{
-    const set=new Set(allTasks.map(t=>t.brand).filter(Boolean));
-    return [...set].sort();
-  },[allTasks]);
+  const upcoming=games.filter(g=>g.game_date>=today).sort((a,b)=>a.game_date.localeCompare(b.game_date));
+  const past=games.filter(g=>g.game_date<today).sort((a,b)=>b.game_date.localeCompare(a.game_date));
+  const next=upcoming[0]||null;
+  const du=next?daysUntil(next.game_date):null;
 
-  // Group by phase
-  const phaseData=useMemo(()=>{
-    return PHASES.map(ph=>({
-      ...ph,
-      tasks:filtered.filter(t=>ph.keys.includes(t.gameday))
-    }));
-  },[filtered]);
-
-  const totalTasks=phaseData.reduce((a,p)=>a+p.tasks.length,0);
+  const GameRow=({g})=>{
+    const d=daysUntil(g.game_date);
+    const isPast=d!==null&&d<0;
+    return(
+      <div style={{background:"#0d0d0d",border:`1px solid ${!isPast&&d===0?accent+"55":BORDER}`,borderRadius:10,padding:"11px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10,opacity:isPast?.6:1}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,color:isPast?MUTED:TEXT}}>{fmtDate(g.game_date,{weekday:"short",month:"short",day:"numeric",year:"numeric"})}{g.game_time&&<span style={{fontSize:11,color:MUTED,fontWeight:400}}> · {fmtTime(g.game_time)}</span>}</div>
+          <div style={{fontSize:11,color:MUTED,marginTop:2}}>{g.opponent?"vs "+g.opponent:""}{g.location?" · "+(g.location==="home"?"🏠 Home":g.location==="away"?"✈️ Away":"⚪ Neutral"):""}{g.notes?" · "+g.notes:""}</div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+          {!isPast&&d===0&&<span style={{fontSize:9,fontWeight:800,color:"#30D158",background:"#30D15822",borderRadius:4,padding:"2px 7px"}}>TODAY</span>}
+          {!isPast&&d===1&&<span style={{fontSize:9,fontWeight:800,color:"#FF9F0A",background:"#FF9F0A22",borderRadius:4,padding:"2px 7px"}}>TOMORROW</span>}
+          {!isPast&&d!==null&&d>1&&<span style={{fontSize:11,color:MUTED}}>in {d}d</span>}
+          {!isPast&&<button onClick={()=>onGo(g)} style={{padding:"6px 12px",borderRadius:8,border:"none",background:accent,color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer"}}>GO LIVE</button>}
+          <button onClick={()=>setEditGame(g)} style={{background:"none",border:`1px solid ${BORDER}`,borderRadius:7,padding:"5px 8px",cursor:"pointer",color:MUTED,fontSize:11}}>✏️</button>
+          <button onClick={()=>setDelGame(g)} style={{background:"none",border:"none",cursor:"pointer",color:"#FF453A33",fontSize:16,lineHeight:1,transition:"color .15s"}} onMouseEnter={e=>e.currentTarget.style.color="#FF453A"} onMouseLeave={e=>e.currentTarget.style.color="#FF453A33"}>×</button>
+        </div>
+      </div>
+    );
+  };
 
   return(
     <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
-      {/* Header */}
       <div style={{background:"#000",borderBottom:`1px solid ${BORDER}`,flexShrink:0}}>
         <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
-          <button onClick={onBack} style={{background:"none",border:"none",color:MUTED,fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px 0 0"}}>‹</button>
-          <span style={{fontSize:22}}>{team.emoji}</span>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontWeight:900,fontSize:16,letterSpacing:-.5,color:accent}}>{team.name}</div>
+          <BackBtn onClick={onBack}/>
+          <span style={{fontSize:26,lineHeight:1}}>{team.emoji}</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:900,fontSize:16,color:accent,letterSpacing:-.5}}>{team.name}</div>
             <div style={{fontSize:10,color:MUTED,letterSpacing:.5}}>{team.sport}</div>
           </div>
-          {/* Search toggle */}
-          <button onClick={()=>setShowSearch(s=>!s)} style={{background:showSearch?"#111":"none",border:`1px solid ${showSearch?accent:BORDER}`,borderRadius:8,padding:"6px 11px",cursor:"pointer",color:showSearch?accent:MUTED,fontSize:13,fontFamily:"inherit"}}>🔍</button>
+          <button onClick={()=>setShowAdd(true)} style={{background:accent,border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:800}}>+ Game</button>
         </div>
 
-        {/* Game info bar */}
-        {game&&(
-          <div style={{padding:"8px 16px",background:accent+"11",borderTop:`1px solid ${accent}22`,display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:du===0?"#30D158":du===1?"#FF9F0A":accent,flexShrink:0}}/>
-            <div>
-              <span style={{fontSize:12,fontWeight:800,color:du===0?"#30D158":du===1?"#FF9F0A":TEXT}}>{gameLabel}</span>
-              <span style={{fontSize:11,color:MUTED,marginLeft:8}}>{game.opponent?`vs ${game.opponent}`:""}{game.location?" · "+game.location:""}{game.time?" · "+fmtTime12(game.time):""}</span>
+        {/* Next game hero */}
+        {next&&(
+          <div style={{padding:"10px 16px 12px",background:accent+"0d",borderTop:`1px solid ${accent}1a`,display:"flex",alignItems:"center",gap:10}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:3}}>Next Game</div>
+              <div style={{fontSize:14,fontWeight:800,color:du===0?"#30D158":du===1?"#FF9F0A":TEXT}}>{du===0?"Today!":du===1?"Tomorrow":fmtDate(next.game_date)}</div>
+              <div style={{fontSize:11,color:MUTED,marginTop:2}}>{next.opponent?"vs "+next.opponent:""}{next.game_time?" · "+fmtTime(next.game_time):""}</div>
             </div>
-            <div style={{flex:1}}/>
-            <span style={{fontSize:10,color:MUTED}}>{totalTasks} tasks</span>
-          </div>
-        )}
-        {!game&&(
-          <div style={{padding:"6px 16px 8px",display:"flex",gap:8,alignItems:"center"}}>
-            <span style={{fontSize:11,color:MUTED,fontStyle:"italic"}}>No upcoming game scheduled</span>
-          </div>
-        )}
-
-        {/* Search bar */}
-        {showSearch&&(
-          <div style={{padding:"0 16px 10px"}}>
-            <input autoFocus value={q} onChange={e=>setQ(e.target.value)}
-              placeholder="Search tasks and content…"
-              style={{width:"100%",padding:"8px 12px",borderRadius:9,border:`1px solid ${accent}44`,background:"#111",color:TEXT,outline:"none"}}/>
+            {taskCounts.total>0&&(
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:9,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:3}}>Content Tasks</div>
+                <div style={{fontSize:22,fontWeight:900,color:accent,lineHeight:1}}>{taskCounts.total}</div>
+                <div style={{fontSize:9,color:MUTED}}>across {PHASES.filter(p=>taskCounts[p.id]>0).length} phases</div>
+              </div>
+            )}
+            <button onClick={()=>onGo(next)} style={{padding:"9px 18px",borderRadius:9,border:"none",background:accent,color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer"}}>GO LIVE</button>
           </div>
         )}
 
-        {/* Brand tabs */}
-        <div style={{display:"flex",overflowX:"auto",scrollbarWidth:"none",borderTop:`1px solid ${BORDER}`,background:"#000"}}>
-          {[{label:"all",display:"ALL",emoji:""},...usedBrands.map(b=>{const bm=brands.find(x=>x.label===b);return{label:b,display:b,emoji:bm?.emoji||""}; })].map(b=>{
-            const active=activeBrand===b.label;
-            return(
-              <button key={b.label} onClick={()=>setActiveBrand(b.label)}
-                style={{padding:"9px 14px",border:"none",borderBottom:active?`2px solid ${accent}`:"2px solid transparent",background:"none",color:active?accent:MUTED,fontFamily:"inherit",fontSize:11,fontWeight:active?700:400,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,transition:"color .15s"}}>
-                {b.emoji&&b.emoji+" "}{b.display}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
-        {totalTasks===0&&(
-          <div style={{textAlign:"center",padding:"64px 0",color:"#222",fontSize:14}}>
-            <div style={{fontSize:36,marginBottom:12}}>{team.emoji}</div>
-            {q?"No matches for your search":"No gameday tasks found — add tasks in Daycrush with a Gameday field set"}
-          </div>
-        )}
-        {phaseData.map((ph,i)=>(
-          <PhaseSection key={ph.id} phase={ph} tasks={ph.tasks} brands={brands} teamName={team.name} teamColor={accent} defaultOpen={i===2||i===1}/>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Schedule Modal ────────────────────────────────────────────────────
-function ScheduleModal({team,onClose}){
-  const[sched,setSched]=useState(()=>{const s=loadSched();return(s[team.id]||[]).sort((a,b)=>a.date.localeCompare(b.date));});
-  const[form,setForm]=useState({date:"",time:"",opponent:"",location:"home",notes:""});
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-
-  const add=()=>{
-    if(!form.date.trim())return;
-    const g={...form,id:genId()};
-    const updated=[...sched,g].sort((a,b)=>a.date.localeCompare(b.date));
-    setSched(updated);
-    const s=loadSched();s[team.id]=updated;saveSched(s);
-    setForm({date:"",time:"",opponent:"",location:"home",notes:""});
-  };
-  const del=id=>{
-    const updated=sched.filter(g=>g.id!==id);
-    setSched(updated);
-    const s=loadSched();s[team.id]=updated;saveSched(s);
-  };
-
-  const inpS={width:"100%",padding:"9px 11px",borderRadius:8,border:`1px solid #222`,background:"#0d0d0d",color:TEXT,outline:"none",marginBottom:10};
-  const accent=team.color;
-
-  return(
-    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflow:"auto",border:"1px solid #1e1e1e",borderBottom:"none"}}>
-        <div style={{padding:"16px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-          <div>
-            <div style={{fontWeight:800,fontSize:16,color:accent}}>{team.emoji} {team.name}</div>
-            <div style={{fontSize:11,color:MUTED}}>Game Schedule</div>
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:MUTED}}>✕</button>
-        </div>
-        <div style={{padding:"0 18px 20px"}}>
-          {/* Add form */}
-          <div style={{background:"#0a0a0a",borderRadius:10,border:`1px solid #1a1a1a`,padding:"12px 14px",marginBottom:16}}>
-            <div style={{fontSize:10,fontWeight:700,color:MUTED,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Add Game</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <div>
-                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Date *</div>
-                <input type="date" value={form.date} onChange={e=>set("date",e.target.value)} style={{...inpS,colorScheme:"dark",marginBottom:0}}/>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Time</div>
-                <input type="time" value={form.time} onChange={e=>set("time",e.target.value)} style={{...inpS,colorScheme:"dark",marginBottom:0}}/>
-              </div>
-            </div>
-            <div style={{marginTop:8}}>
-              <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Opponent</div>
-              <input value={form.opponent} onChange={e=>set("opponent",e.target.value)} placeholder="e.g. Pittsburgh Pirates" style={{...inpS,marginBottom:0}}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-              <div>
-                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Location</div>
-                <select value={form.location} onChange={e=>set("location",e.target.value)} style={{...inpS,marginBottom:0,cursor:"pointer"}}>
-                  <option value="home">🏠 Home</option>
-                  <option value="away">✈️ Away</option>
-                  <option value="neutral">⚪ Neutral</option>
-                </select>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Notes</div>
-                <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional" style={{...inpS,marginBottom:0}}/>
-              </div>
-            </div>
-            <button onClick={add} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:9,border:"none",background:form.date?accent:"#222",color:form.date?"#fff":MUTED,fontWeight:800,fontFamily:"inherit",fontSize:13,cursor:form.date?"pointer":"default"}}>Add Game</button>
-          </div>
-
-          {/* Game list */}
-          {sched.length===0&&<div style={{textAlign:"center",padding:"24px 0",color:"#333",fontSize:13,fontStyle:"italic"}}>No games scheduled</div>}
-          {sched.map(g=>{
-            const du=daysUntil(g.date);
-            const past=du!==null&&du<0;
-            return(
-              <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:9,background:"#0d0d0d",border:`1px solid ${!past&&du===0?accent+"44":BORDER}`,marginBottom:6,opacity:past?.5:1}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:600,color:past?MUTED:TEXT}}>{fmtDateShort(g.date)}{g.time&&<span style={{color:MUTED,fontWeight:400}}> · {fmtTime12(g.time)}</span>}</div>
-                  <div style={{fontSize:11,color:MUTED,marginTop:2}}>{g.opponent?"vs "+g.opponent:""}{g.location?" · "+(g.location==="home"?"🏠 Home":g.location==="away"?"✈️ Away":"⚪ Neutral"):""}{g.notes?" · "+g.notes:""}</div>
+        {/* Phase task counts */}
+        {taskCounts.total>0&&(
+          <div style={{overflowX:"auto",scrollbarWidth:"none",borderTop:`1px solid ${BORDER}`,padding:"0 8px"}}>
+            <div style={{display:"flex",padding:"8px 0",gap:4,minWidth:"max-content"}}>
+              {PHASES.filter(p=>taskCounts[p.id]>0).map(p=>(
+                <div key={p.id} style={{padding:"4px 10px",borderRadius:7,background:p.color+"11",border:`1px solid ${p.color}33`,flexShrink:0}}>
+                  <div style={{fontSize:9,color:p.color,fontWeight:700,letterSpacing:.5}}>{p.icon} {p.label}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:p.color,lineHeight:1.2}}>{taskCounts[p.id]}</div>
                 </div>
-                {!past&&du===0&&<span style={{fontSize:10,fontWeight:700,color:"#30D158",background:"#30D15822",borderRadius:5,padding:"2px 7px"}}>TODAY</span>}
-                {!past&&du===1&&<span style={{fontSize:10,fontWeight:700,color:"#FF9F0A",background:"#FF9F0A22",borderRadius:5,padding:"2px 7px"}}>TOMORROW</span>}
-                {!past&&du!==null&&du>1&&<span style={{fontSize:10,color:MUTED}}>in {du}d</span>}
-                <button onClick={()=>del(g.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#FF453A44",fontSize:16,lineHeight:1,padding:"2px 4px",transition:"color .15s"}} onMouseEnter={e=>e.currentTarget.style.color="#FF453A"} onMouseLeave={e=>e.currentTarget.style.color="#FF453A44"}>×</button>
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",borderTop:`1px solid ${BORDER}`}}>
+          {[{id:"upcoming",label:"Upcoming",count:upcoming.length},{id:"past",label:"Past",count:past.length}].map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              style={{flex:1,padding:"9px 0",border:"none",borderBottom:tab===t.id?`2px solid ${accent}`:"2px solid transparent",background:"none",color:tab===t.id?accent:MUTED,fontSize:11,fontWeight:tab===t.id?700:400,cursor:"pointer"}}>
+              {t.label} ({t.count})
+            </button>
+          ))}
         </div>
       </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"12px 16px 40px"}}>
+        {loading&&<div style={{display:"flex",justifyContent:"center",padding:48}}><Spinner color={accent}/></div>}
+        {!loading&&(tab==="upcoming"?upcoming:past).length===0&&(
+          <div style={{textAlign:"center",padding:"56px 0",color:"#222",fontSize:13}}>
+            <div style={{fontSize:32,marginBottom:10}}>{team.emoji}</div>
+            {tab==="upcoming"?"No upcoming games — tap + Game to schedule one":"No past games recorded"}
+          </div>
+        )}
+        {!loading&&(tab==="upcoming"?upcoming:past).map(g=><GameRow key={g.id} g={g}/>)}
+      </div>
+
+      {showAdd&&<GameForm userId={userId} teamId={team.id} teamColor={accent} onSave={()=>{setShowAdd(false);load();}} onClose={()=>setShowAdd(false)}/>}
+      {editGame&&<GameForm game={editGame} userId={userId} teamId={team.id} teamColor={accent} onSave={()=>{setEditGame(null);load();}} onClose={()=>setEditGame(null)}/>}
+      {delGame&&<ConfirmDel msg={`Delete game vs ${delGame.opponent||fmtDate(delGame.game_date)}?`}
+        onConfirm={async()=>{await db.from("gd_games").delete().eq("id",delGame.id);setDelGame(null);load();}}
+        onCancel={()=>setDelGame(null)}/>}
     </div>
   );
 }
 
-// ── Team Card ─────────────────────────────────────────────────────────
-function TeamCard({team,taskCount,onGo,onSchedule}){
-  const game=nextGame(team.id);
-  const du=game?daysUntil(game.date):null;
-  const accent=team.color;
-  const isToday=du===0;
-  const isTomorrow=du===1;
+// ── Home ───────────────────────────────────────────────────────────────
+function HomeScreen({userId,brands,onSelectTeam,onSignOut}){
+  const[nextGames,setNextGames]=useState({});
+  const[loading,setLoading]=useState(true);
+
+  const load=async()=>{
+    setLoading(true);
+    const{data}=await db.from("gd_games").select("*").eq("user_id",userId).gte("game_date",todayStr()).order("game_date").order("game_time");
+    const m={};(data||[]).forEach(g=>{if(!m[g.team_id])m[g.team_id]=g;});
+    setNextGames(m);setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const todayTeams=TEAMS.filter(t=>{const g=nextGames[t.id];return g&&daysUntil(g.game_date)===0;});
 
   return(
-    <div style={{background:"#0a0a0a",borderRadius:14,border:`1px solid ${isToday?accent+"66":BORDER}`,overflow:"hidden",boxShadow:isToday?`0 0 20px ${accent}22`:"none",transition:"border-color .2s"}}>
-      {/* Team header */}
-      <div style={{background:accent+"11",borderBottom:`1px solid ${accent}22`,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:26,lineHeight:1}}>{team.emoji}</span>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontWeight:800,fontSize:14,color:accent,letterSpacing:-.3,lineHeight:1.2}}>{team.name}</div>
-          <div style={{fontSize:10,color:MUTED,letterSpacing:1,marginTop:2}}>{team.sport}</div>
+    <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
+      <div style={{padding:"14px 16px 12px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:900,fontSize:22,letterSpacing:-1.5}}>GAMEDAY</div>
+          <div style={{fontSize:9,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:2}}>Command Center</div>
         </div>
-        {isToday&&<span style={{fontSize:10,fontWeight:800,color:"#30D158",background:"#30D15822",borderRadius:5,padding:"3px 8px",letterSpacing:.5}}>LIVE</span>}
+        <button onClick={onSignOut} style={{background:"none",border:`1px solid ${BORDER}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:MUTED,fontSize:11}}>sign out</button>
       </div>
 
-      {/* Next game */}
-      <div style={{padding:"10px 14px"}}>
-        {game?(
-          <>
-            <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:4}}>Next Game</div>
-            <div style={{fontSize:13,fontWeight:700,color:isToday?"#30D158":isTomorrow?"#FF9F0A":TEXT}}>{isToday?"Today!":isTomorrow?"Tomorrow":fmtDateShort(game.date)}</div>
-            <div style={{fontSize:11,color:MUTED,marginTop:2}}>{game.opponent?"vs "+game.opponent:""}{game.time?" · "+fmtTime12(game.time):""}{game.location?" · "+(game.location==="home"?"Home":"Away"):""}</div>
-          </>
-        ):(
-          <div style={{fontSize:11,color:"#333",fontStyle:"italic"}}>No game scheduled</div>
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px 40px"}}>
+        {loading&&<div style={{display:"flex",justifyContent:"center",padding:48}}><Spinner color="#FF6B00"/></div>}
+
+        {/* Game day banner */}
+        {!loading&&todayTeams.length>0&&(
+          <div style={{background:"#0a1a0a",border:"1px solid #30D15833",borderRadius:12,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:"#30D158",boxShadow:"0 0 8px #30D158",flexShrink:0}}/>
+            <span style={{fontSize:12,fontWeight:800,color:"#30D158"}}>GAME DAY:</span>
+            <span style={{fontSize:12,color:"#30D158"}}>{todayTeams.map(t=>t.name).join(" · ")}</span>
+          </div>
         )}
-      </div>
 
-      {/* Task count + actions */}
-      <div style={{padding:"8px 14px 12px",display:"flex",alignItems:"center",gap:8}}>
-        <span style={{fontSize:10,color:"#333"}}>{taskCount} task{taskCount!==1?"s":""}</span>
-        <div style={{flex:1}}/>
-        <button onClick={onSchedule} style={{padding:"7px 12px",borderRadius:8,border:`1px solid ${BORDER}`,background:"transparent",color:MUTED,fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>📅 Schedule</button>
-        <button onClick={onGo} style={{padding:"7px 16px",borderRadius:8,border:"none",background:accent,color:"#fff",fontSize:12,fontWeight:800,fontFamily:"inherit",cursor:"pointer"}}>GO LIVE</button>
+        {/* Team cards */}
+        {!loading&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10,marginBottom:24}}>
+            {TEAMS.map(team=>{
+              const g=nextGames[team.id]||null;
+              const du=g?daysUntil(g.game_date):null;
+              const isToday=du===0;
+              const accent=team.color;
+              return(
+                <div key={team.id} onClick={()=>onSelectTeam(team)} className="fade"
+                  style={{background:"#0a0a0a",borderRadius:13,border:`1px solid ${isToday?accent+"66":BORDER}`,cursor:"pointer",overflow:"hidden",boxShadow:isToday?`0 0 24px ${accent}15`:"none",transition:"all .2s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=accent+"55";e.currentTarget.style.background="#0d0d0d";}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=isToday?accent+"66":BORDER;e.currentTarget.style.background="#0a0a0a";}}>
+                  <div style={{background:accent+"0d",borderBottom:`1px solid ${accent}1a`,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:28,lineHeight:1}}>{team.emoji}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:800,fontSize:14,color:accent,letterSpacing:-.3}}>{team.name}</div>
+                      <div style={{fontSize:10,color:MUTED,letterSpacing:.5,marginTop:1}}>{team.sport}</div>
+                    </div>
+                    {isToday&&<span style={{fontSize:9,fontWeight:800,color:"#30D158",background:"#30D15822",borderRadius:4,padding:"3px 8px",letterSpacing:.5}}>● LIVE</span>}
+                  </div>
+                  <div style={{padding:"10px 14px 12px"}}>
+                    {g?(
+                      <>
+                        <div style={{fontSize:9,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:3}}>Next Game</div>
+                        <div style={{fontSize:13,fontWeight:700,color:isToday?"#30D158":du===1?"#FF9F0A":TEXT}}>
+                          {isToday?"Today!":du===1?"Tomorrow":fmtDate(g.game_date)}
+                        </div>
+                        <div style={{fontSize:11,color:MUTED,marginTop:2}}>
+                          {g.opponent?"vs "+g.opponent:""}{g.game_time?" · "+fmtTime(g.game_time):""}{g.location?" · "+(g.location==="home"?"Home":g.location==="away"?"Away":"Neutral"):""}
+                        </div>
+                      </>
+                    ):(
+                      <div style={{fontSize:11,color:"#2a2a2a",fontStyle:"italic"}}>No upcoming games — tap to add</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Brands */}
+        {!loading&&brands.length>0&&(
+          <div>
+            <div style={{fontSize:9,color:MUTED,letterSpacing:1.2,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>Brands ({brands.length})</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {brands.map(b=><span key={b} style={{fontSize:11,padding:"5px 10px",borderRadius:99,border:`1px solid ${BORDER}`,background:"#0a0a0a",color:MUTED}}>{b}</span>)}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Home Screen ───────────────────────────────────────────────────────
-function HomeScreen({user,allTasks,brands,onGo,onSignOut}){
-  const[schedTeam,setSchedTeam]=useState(null);
-  const[tick,setTick]=useState(0); // force re-render after schedule changes
+// ── Multi-Team Command Center ──────────────────────────────────────────
+function MultiCenter({entries,userId,brands,onBack}){
+  const[activeIdx,setActiveIdx]=useState(0);
+  const active=entries[activeIdx];
+  return(
+    <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
+      <div style={{display:"flex",borderBottom:`1px solid ${BORDER}`,background:"#000",flexShrink:0,overflowX:"auto",scrollbarWidth:"none"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",borderRight:`1px solid ${BORDER}`,color:MUTED,cursor:"pointer",padding:"0 14px",fontSize:20,lineHeight:1,flexShrink:0,display:"flex",alignItems:"center"}}>‹</button>
+        {entries.map((e,i)=>{
+          const isActive=i===activeIdx;
+          const du=daysUntil(e.game.game_date);
+          return(
+            <button key={e.team.id} onClick={()=>setActiveIdx(i)}
+              style={{display:"flex",alignItems:"center",gap:7,padding:"10px 16px",border:"none",borderBottom:isActive?`3px solid ${e.team.color}`:"3px solid transparent",background:isActive?e.team.color+"0d":"none",color:isActive?e.team.color:MUTED,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,transition:"all .15s"}}>
+              <span style={{fontSize:18,lineHeight:1}}>{e.team.emoji}</span>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:11,fontWeight:isActive?800:500,letterSpacing:-.2}}>{e.team.short}</div>
+                <div style={{fontSize:9,color:du===0?"#30D158":du===1?"#FF9F0A":MUTED,fontWeight:700}}>
+                  {du===0?"TODAY":du===1?"TOMORROW":fmtDate(e.game.game_date,{month:"short",day:"numeric"})}
+                </div>
+              </div>
+              {du===0&&<div style={{width:6,height:6,borderRadius:"50%",background:"#30D158",boxShadow:"0 0 6px #30D158",flexShrink:0}}/>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+        <CommandCenter key={active.team.id+"-"+active.game.id} team={active.team} game={active.game} userId={userId} brands={brands} onBack={onBack}/>
+      </div>
+    </div>
+  );
+}
 
-  const taskCountByTeam=()=>{
-    // All gameday tasks are relevant to all teams (they're content templates)
-    // Just show total
-    return allTasks.length;
+// ── Home Screen ────────────────────────────────────────────────────────
+function HomeScreen({userId,brands,onSelectTeam,onSelectMulti,onSignOut}){
+  const[nextGames,setNextGames]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[selected,setSelected]=useState(new Set());
+  const[multiMode,setMultiMode]=useState(false);
+
+  const load=async()=>{
+    setLoading(true);
+    const{data}=await db.from("gd_games").select("*").eq("user_id",userId).gte("game_date",todayStr()).order("game_date").order("game_time");
+    const m={};(data||[]).forEach(g=>{if(!m[g.team_id])m[g.team_id]=g;});
+    setNextGames(m);setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const todayTeams=TEAMS.filter(t=>{const g=nextGames[t.id];return g&&daysUntil(g.game_date)===0;});
+  const teamsWithGames=TEAMS.filter(t=>nextGames[t.id]);
+
+  const toggleSelect=id=>setSelected(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
+
+  const goMulti=()=>{
+    const entries=[...selected].map(id=>({team:TMAP[id],game:nextGames[id]})).filter(e=>e.game);
+    if(entries.length===1)onSelectTeam(entries[0].team);
+    else if(entries.length>1)onSelectMulti(entries);
   };
 
   return(
     <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
-      {/* Header */}
       <div style={{padding:"14px 16px 12px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         <div style={{flex:1}}>
-          <div style={{fontWeight:900,fontSize:20,letterSpacing:-1}}>GAMEDAY</div>
+          <div style={{fontWeight:900,fontSize:22,letterSpacing:-1.5}}>GAMEDAY</div>
           <div style={{fontSize:9,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:2}}>Command Center</div>
         </div>
-        <div style={{fontSize:10,color:"#333"}}>{allTasks.length} tasks across {PHASES.length} phases</div>
-        <button onClick={onSignOut} style={{background:"none",border:`1px solid ${BORDER}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:MUTED,fontSize:11,fontFamily:"inherit"}}>sign out</button>
+        {teamsWithGames.length>1&&(
+          <button onClick={()=>{setMultiMode(m=>!m);setSelected(new Set());}}
+            style={{background:multiMode?"#FF6B00":"none",border:`1px solid ${multiMode?"#FF6B00":BORDER}`,borderRadius:7,padding:"5px 11px",cursor:"pointer",color:multiMode?"#000":MUTED,fontSize:11,fontWeight:multiMode?800:400,transition:"all .15s"}}>
+            {multiMode?"✕ Cancel":"⊕ Multi"}
+          </button>
+        )}
+        <button onClick={onSignOut} style={{background:"none",border:`1px solid ${BORDER}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:MUTED,fontSize:11}}>sign out</button>
       </div>
 
-      <div style={{flex:1,overflowY:"auto",padding:"16px 16px 40px"}}>
-        {/* Today's games banner */}
-        {TEAMS.some(t=>{const g=nextGame(t.id);return g&&daysUntil(g.date)===0;})&&(
-          <div style={{background:"#0a1a0a",border:"1px solid #30D15833",borderRadius:12,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:8,height:8,borderRadius:"50%",background:"#30D158",animation:"spin .8s linear infinite"}}/>
-            <span style={{fontSize:12,fontWeight:700,color:"#30D158"}}>Games Today:</span>
-            <span style={{fontSize:12,color:"#30D158"}}>{TEAMS.filter(t=>{const g=nextGame(t.id);return g&&daysUntil(g.date)===0;}).map(t=>t.short).join(", ")}</span>
+      {multiMode&&(
+        <div style={{padding:"8px 16px",background:"#0d0800",borderBottom:`1px solid #FF6B0033`,display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <span style={{fontSize:11,color:"#FF6B00"}}>Select teams playing simultaneously</span>
+          <div style={{flex:1}}/>
+          {selected.size>0&&<button onClick={goMulti} style={{background:"#FF6B00",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",color:"#000",fontSize:12,fontWeight:900}}>GO LIVE ({selected.size})</button>}
+        </div>
+      )}
+
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px 40px"}}>
+        {loading&&<div style={{display:"flex",justifyContent:"center",padding:48}}><Spinner color="#FF6B00"/></div>}
+
+        {!loading&&todayTeams.length>0&&(
+          <div style={{background:"#0a1a0a",border:"1px solid #30D15833",borderRadius:12,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:"#30D158",boxShadow:"0 0 8px #30D158",flexShrink:0}}/>
+            <span style={{fontSize:12,fontWeight:800,color:"#30D158"}}>GAME DAY:</span>
+            <span style={{fontSize:12,color:"#30D158"}}>{todayTeams.map(t=>t.name).join(" · ")}</span>
+            {todayTeams.length>1&&!multiMode&&(
+              <button onClick={()=>{setMultiMode(true);setSelected(new Set(todayTeams.map(t=>t.id)));}}
+                style={{marginLeft:"auto",background:"#30D158",border:"none",borderRadius:7,padding:"5px 11px",cursor:"pointer",color:"#000",fontSize:11,fontWeight:800}}>Run All</button>
+            )}
           </div>
         )}
 
-        {/* Team grid */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:12}}>
-          {TEAMS.map(team=>(
-            <TeamCard key={team.id} team={team} taskCount={allTasks.length}
-              onGo={()=>onGo(team)}
-              onSchedule={()=>setSchedTeam(team)}/>
-          ))}
-        </div>
-
-        {/* Quick stats */}
-        <div style={{marginTop:24,display:"flex",gap:10,flexWrap:"wrap"}}>
-          {PHASES.map(ph=>{
-            const count=allTasks.filter(t=>ph.keys.includes(t.gameday)).length;
-            if(!count)return null;
-            const color=ph.color||"#FF6B00";
-            return(
-              <div key={ph.id} style={{background:"#0a0a0a",border:`1px solid ${color}22`,borderRadius:9,padding:"8px 14px",display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:13}}>{ph.icon}</span>
-                <div>
-                  <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase"}}>{ph.label}</div>
-                  <div style={{fontSize:16,fontWeight:800,color}}>{count}</div>
+        {!loading&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10,marginBottom:24}}>
+            {TEAMS.map(team=>{
+              const g=nextGames[team.id]||null;
+              const du=g?daysUntil(g.game_date):null;
+              const isToday=du===0;
+              const accent=team.color;
+              const isSel=selected.has(team.id);
+              return(
+                <div key={team.id}
+                  onClick={()=>{if(multiMode){if(g)toggleSelect(team.id);}else onSelectTeam(team);}}
+                  className="fade"
+                  style={{background:isSel?accent+"0f":"#0a0a0a",borderRadius:13,border:`2px solid ${isSel?accent:isToday?accent+"55":BORDER}`,cursor:"pointer",overflow:"hidden",boxShadow:isSel?`0 0 20px ${accent}22`:isToday?`0 0 24px ${accent}15`:"none",transition:"all .2s",opacity:multiMode&&!g?.55:1}}
+                  onMouseEnter={e=>{if(!isSel){e.currentTarget.style.borderColor=accent+"55";e.currentTarget.style.background="#0d0d0d";}}}
+                  onMouseLeave={e=>{if(!isSel){e.currentTarget.style.borderColor=isToday?accent+"55":BORDER;e.currentTarget.style.background="#0a0a0a";}}}>
+                  <div style={{background:accent+"0d",borderBottom:`1px solid ${accent}1a`,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:28,lineHeight:1}}>{team.emoji}</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:800,fontSize:14,color:accent,letterSpacing:-.3}}>{team.name}</div>
+                      <div style={{fontSize:10,color:MUTED,letterSpacing:.5,marginTop:1}}>{team.sport}</div>
+                    </div>
+                    {multiMode&&g&&(
+                      <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${isSel?accent:BORDER}`,background:isSel?accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+                        {isSel&&<span style={{fontSize:12,color:"#fff",fontWeight:900,lineHeight:1}}>✓</span>}
+                      </div>
+                    )}
+                    {!multiMode&&isToday&&<span style={{fontSize:9,fontWeight:800,color:"#30D158",background:"#30D15822",borderRadius:4,padding:"3px 8px",letterSpacing:.5}}>● LIVE</span>}
+                  </div>
+                  <div style={{padding:"10px 14px 12px"}}>
+                    {g?(
+                      <>
+                        <div style={{fontSize:9,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:3}}>Next Game</div>
+                        <div style={{fontSize:13,fontWeight:700,color:isToday?"#30D158":du===1?"#FF9F0A":TEXT}}>
+                          {isToday?"Today!":du===1?"Tomorrow":fmtDate(g.game_date)}
+                        </div>
+                        <div style={{fontSize:11,color:MUTED,marginTop:2}}>
+                          {g.opponent?"vs "+g.opponent:""}{g.game_time?" · "+fmtTime(g.game_time):""}{g.location?" · "+(g.location==="home"?"Home":g.location==="away"?"Away":"Neutral"):""}
+                        </div>
+                      </>
+                    ):(
+                      <div style={{fontSize:11,color:"#2a2a2a",fontStyle:"italic"}}>No upcoming games — tap to add</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-          {brands.length>0&&(
-            <div style={{background:"#0a0a0a",border:`1px solid #333`,borderRadius:9,padding:"8px 14px",display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13}}>🏷</span>
-              <div>
-                <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase"}}>Brands</div>
-                <div style={{fontSize:16,fontWeight:800,color:TEXT}}>{brands.length}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+              );
+            })}
+          </div>
+        )}
 
-      {schedTeam&&<ScheduleModal team={schedTeam} onClose={()=>{setSchedTeam(null);setTick(t=>t+1);}}/>}
+        {!loading&&brands.length>0&&(
+          <div>
+            <div style={{fontSize:9,color:MUTED,letterSpacing:1.2,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>Brands ({brands.length})</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {brands.map(b=><span key={b} style={{fontSize:11,padding:"5px 10px",borderRadius:99,border:`1px solid ${BORDER}`,background:"#0a0a0a",color:MUTED}}>{b}</span>)}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Root ──────────────────────────────────────────────────────────────
+// ── Root ───────────────────────────────────────────────────────────────
 function App(){
   const[screen,setScreen]=useState("loading");
   const[user,setUser]=useState(null);
-  const[allTasks,setAllTasks]=useState([]);
   const[brands,setBrands]=useState([]);
   const[activeTeam,setActiveTeam]=useState(null);
+  const[activeGame,setActiveGame]=useState(null);
+  const[multiEntries,setMultiEntries]=useState(null);
 
-  const load=async u=>{
-    const{tasks,brands}=await loadAllData(u.id);
-    setAllTasks(tasks);setBrands(brands);
-    setScreen("home");
+  const loadBrands=async uid=>{
+    const{data:mem}=await db.from("board_members").select("board_id").eq("user_id",uid);
+    const ids=(mem||[]).map(m=>m.board_id);
+    if(!ids.length)return;
+    const{data:s}=await db.from("board_settings").select("brands_json").in("board_id",ids);
+    const bm={};
+    (s||[]).forEach(r=>{try{JSON.parse(r.brands_json||"[]").forEach(b=>{if(b.label)bm[b.label]=true;});}catch{}});
+    setBrands(Object.keys(bm).sort());
   };
 
   useEffect(()=>{
     db.auth.getSession().then(({data:{session}})=>{
-      if(session){setUser(session.user);load(session.user);}
+      if(session){setUser(session.user);loadBrands(session.user.id).then(()=>setScreen("home"));}
       else setScreen("auth");
     });
-    const{data:{subscription}}=db.auth.onAuthStateChange((_,session)=>{
-      if(!session){setUser(null);setScreen("auth");}
-    });
+    const{data:{subscription}}=db.auth.onAuthStateChange((_,s)=>{if(!s){setUser(null);setScreen("auth");}});
     return()=>subscription.unsubscribe();
   },[]);
 
-  const signOut=()=>db.auth.signOut();
-
   if(screen==="loading")return(
-    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,background:"#000"}}>
-      <div style={{fontWeight:900,fontSize:24,letterSpacing:-1}}>GAMEDAY</div>
-      <div className="spin" style={{width:22,height:22,border:"2px solid #1a1a1a",borderTopColor:"#FF6B00",borderRadius:"50%"}}/>
+    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+      <div style={{fontWeight:900,fontSize:28,letterSpacing:-2}}>GAMEDAY</div>
+      <Spinner size={24} color="#FF6B00"/>
     </div>
   );
 
-  if(screen==="auth")return<AuthScreen onAuth={u=>{setUser(u);load(u);}}/>;
-
-  if(screen==="home")return(
-    <>
-      <HomeScreen user={user} allTasks={allTasks} brands={brands}
-        onGo={team=>{setActiveTeam(team);setScreen("center");}}
-        onSignOut={signOut}/>
-    </>
-  );
-
-  if(screen==="center"&&activeTeam)return(
-    <CommandCenter
-      team={activeTeam}
-      game={nextGame(activeTeam.id)}
-      allTasks={allTasks}
-      brands={brands}
-      onBack={()=>{setScreen("home");setActiveTeam(null);}}/>
-  );
-
+  if(screen==="auth")return<AuthScreen onAuth={u=>{setUser(u);loadBrands(u.id).then(()=>setScreen("home"));}}/>;
+  if(screen==="home")return<HomeScreen userId={user.id} brands={brands}
+    onSelectTeam={t=>{setActiveTeam(t);setScreen("team");}}
+    onSelectMulti={entries=>{setMultiEntries(entries);setScreen("multi");}}
+    onSignOut={()=>db.auth.signOut()}/>;
+  if(screen==="team"&&activeTeam)return<TeamScreen team={activeTeam} userId={user.id} brands={brands} onGo={g=>{setActiveGame(g);setScreen("center");}} onBack={()=>{setActiveTeam(null);setScreen("home");}}/>;
+  if(screen==="center"&&activeTeam&&activeGame)return<CommandCenter team={activeTeam} game={activeGame} userId={user.id} brands={brands} onBack={()=>{setActiveGame(null);setScreen("team");}}/>;
+  if(screen==="multi"&&multiEntries)return<MultiCenter entries={multiEntries} userId={user.id} brands={brands} onBack={()=>{setMultiEntries(null);setScreen("home");}}/>;
   return null;
 }
 
