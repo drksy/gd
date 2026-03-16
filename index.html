@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="theme-color" content="#000000"/>
+<title>GAMEDAY</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%;background:#000;color:#e8e8e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:#222;border-radius:99px}
+input,select,textarea{font-size:16px!important;font-family:inherit;color-scheme:dark}
+.spin{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pop{0%{transform:scale(.92);opacity:0}100%{transform:scale(1);opacity:1}}
+.pop{animation:pop .18s ease-out}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo,useCallback}=React;
+
+const SURL='https://hnfvtllodmgsipyuwzsx.supabase.co';
+const SKEY='sb_publishable_QXavQFS_CIRS1XRLpvLp1w_kgUReM17';
+const db=supabase.createClient(SURL,SKEY);
+
+const BORDER="#1e1e1e",MUTED="#555",TEXT="#e8e8e8";
+
+// ── Teams ────────────────────────────────────────────────────────────
+const TEAMS=[
+  {id:"reds",    name:"Cincinnati Reds",          short:"Reds",      emoji:"⚾", color:"#C6011F", sport:"MLB"},
+  {id:"bengals", name:"Cincinnati Bengals",        short:"Bengals",   emoji:"🐯", color:"#FB4F14", sport:"NFL"},
+  {id:"fcc",     name:"FC Cincinnati",             short:"FCC",       emoji:"⚽", color:"#003087", sport:"MLS"},
+  {id:"bball",   name:"Bearcats Basketball",       short:"Bearcats",  emoji:"🏀", color:"#E00122", sport:"NCAAB"},
+  {id:"bfootball",name:"Bearcats Football",        short:"Bearcats",  emoji:"🏈", color:"#BE0000", sport:"NCAAF"},
+];
+
+// ── Gameday Phases ────────────────────────────────────────────────────
+const PHASES=[
+  {id:"week",  label:"WEEK AHEAD",  color:"#5E5CE6", icon:"📅",
+   keys:["7 DAYS BEFORE GD","6 DAYS BEFORE GD","5 DAYS BEFORE GD","4 DAYS BEFORE GD","3 DAYS BEFORE GD"]},
+  {id:"soon",  label:"COMING UP",   color:"#FF9F0A", icon:"⏰",
+   keys:["2 DAYS BEFORE GD","DAY BEFORE GD"]},
+  {id:"game",  label:"GAME DAY",    color:null,      icon:"🏟",
+   keys:["GAMEDAY"]},
+  {id:"post",  label:"POST GAME",   color:"#30D158", icon:"✅",
+   keys:["DAY AFTER GD","2 DAYS AFTER GD","3 DAYS AFTER GD","4 DAYS AFTER GD","5 DAYS AFTER GD","6 DAYS AFTER GD","7 DAYS AFTER GD"]},
+];
+
+const SCHED_KEY="gameday_sched_v1";
+
+function genId(){return crypto.randomUUID();}
+function todayStr(){
+  const et=new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));
+  return et.toISOString().split("T")[0];
+}
+function fmtDateShort(s){
+  if(!s)return"—";
+  return new Date(s+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+}
+function fmtTime12(t){
+  if(!t)return"";
+  const[h,m]=t.split(":");const hr=parseInt(h);
+  return`${hr===0?12:hr>12?hr-12:hr}:${m} ${hr<12?"AM":"PM"}`;
+}
+function daysUntil(dateStr){
+  if(!dateStr)return null;
+  const today=new Date(todayStr()+"T00:00:00");
+  const d=new Date(dateStr+"T00:00:00");
+  return Math.round((d-today)/86400000);
+}
+
+// ── Schedule helpers ──────────────────────────────────────────────────
+function loadSched(){try{return JSON.parse(localStorage.getItem(SCHED_KEY)||"{}");}catch{return {};}}
+function saveSched(s){localStorage.setItem(SCHED_KEY,JSON.stringify(s));}
+function nextGame(teamId){
+  const sched=loadSched();
+  const games=(sched[teamId]||[]).filter(g=>g.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date));
+  return games[0]||null;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────
+function AuthScreen({onAuth}){
+  const [email,setEmail]=useState(""),[pw,setPw]=useState(""),[loading,setLoading]=useState(false),[err,setErr]=useState("");
+  const B="#111",BD="1px solid #222";
+  async function go(){
+    if(!email||!pw){setErr("Required");return;}
+    setLoading(true);setErr("");
+    const{data,error}=await db.auth.signInWithPassword({email,password:pw});
+    if(error){setErr(error.message);setLoading(false);return;}
+    onAuth(data.user);
+  }
+  return(
+    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",padding:24,background:"#000"}}>
+      <div style={{width:"100%",maxWidth:340}}>
+        <div style={{marginBottom:32,textAlign:"center"}}>
+          <div style={{fontSize:28,fontWeight:900,letterSpacing:-1}}>GAMEDAY</div>
+          <div style={{fontSize:10,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:4}}>Command Center</div>
+        </div>
+        {["Email","Password"].map((lbl,i)=>(
+          <div key={lbl} style={{marginBottom:12}}>
+            <div style={{fontSize:10,fontWeight:700,color:MUTED,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{lbl}</div>
+            <input type={i===1?"password":"email"} value={i===0?email:pw} onChange={e=>i===0?setEmail(e.target.value):setPw(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&go()} placeholder={i===0?"you@example.com":"••••••••"}
+              style={{width:"100%",padding:"10px 12px",borderRadius:8,border:BD,background:B,color:TEXT,outline:"none"}} autoCapitalize="none"/>
+          </div>
+        ))}
+        {err&&<div style={{fontSize:12,color:"#FF453A",marginBottom:12,padding:"8px 12px",borderRadius:8,background:"#1a0a0a"}}>{err}</div>}
+        <button onClick={go} disabled={loading} style={{width:"100%",padding:13,borderRadius:10,border:"none",background:loading?"#222":"#FF6B00",color:loading?MUTED:"#000",fontWeight:800,fontSize:14,fontFamily:"inherit",cursor:loading?"default":"pointer"}}>
+          {loading?"…":"Sign In"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Data loader ───────────────────────────────────────────────────────
+async function loadAllData(userId){
+  const{data:mem}=await db.from("board_members").select("board_id,boards(id,name)").eq("user_id",userId);
+  const boards=(mem||[]).map(m=>m.boards).filter(Boolean);
+  const boardIds=boards.map(b=>b.id);
+  if(!boardIds.length)return{tasks:[],brands:[]};
+
+  const[taskRes,settingsRes]=await Promise.all([
+    db.from("tasks").select("id,title,notes,link,brand,gameday,done,status,time").in("board_id",boardIds).not("gameday","is",null).neq("gameday",""),
+    db.from("board_settings").select("brands_json").in("board_id",boardIds),
+  ]);
+
+  const tasks=(taskRes.data||[]).filter(t=>t.gameday&&t.gameday.trim());
+
+  // Merge brands from all boards
+  const brandMap={};
+  (settingsRes.data||[]).forEach(s=>{
+    if(!s.brands_json)return;
+    try{
+      const arr=JSON.parse(s.brands_json);
+      arr.forEach(b=>{if(b.label)brandMap[b.label]=b;});
+    }catch{}
+  });
+  const brands=Object.values(brandMap);
+
+  return{tasks,brands};
+}
+
+// ── Task Card ─────────────────────────────────────────────────────────
+function TaskCard({task,brandMeta,teamName,onEdit,accent}){
+  const[expanded,setExpanded]=useState(false);
+  const bm=brandMeta;
+  const hasLink=task.link&&task.link.trim();
+  const hasNotes=task.notes&&task.notes.trim();
+  const searchQ=encodeURIComponent(`${teamName} ${task.title}`);
+
+  return(
+    <div className="pop" style={{background:"#0d0d0d",border:`1px solid ${BORDER}`,borderRadius:12,marginBottom:6,overflow:"hidden",borderLeft:accent?`3px solid ${accent}`:`3px solid #222`}}>
+      <div style={{padding:"11px 14px",display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}} onClick={()=>setExpanded(x=>!x)}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:600,color:TEXT,lineHeight:1.35,marginBottom:4}}>{task.title||"Untitled"}</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            {task.brand&&<span style={{fontSize:10,background:accent?accent+"22":"#222",color:accent||MUTED,borderRadius:5,padding:"2px 7px",fontWeight:700,letterSpacing:.3}}>{bm?.emoji||""} {task.brand}</span>}
+            {task.time&&<span style={{fontSize:10,color:"#5E5CE6",fontWeight:600}}>🕐 {fmtTime12(task.time)}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
+          {hasLink&&<a href={task.link} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
+            style={{fontSize:11,padding:"5px 9px",borderRadius:7,border:"1px solid #5E5CE644",background:"#0a0a1a",color:"#5E5CE6",textDecoration:"none",fontWeight:700,whiteSpace:"nowrap"}}>📋 Template</a>}
+          <a href={`https://www.google.com/search?q=${searchQ}`} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}
+            style={{fontSize:11,padding:"5px 9px",borderRadius:7,border:"1px solid #333",background:"#111",color:MUTED,textDecoration:"none",fontWeight:700}}>🔍</a>
+          <span style={{fontSize:12,color:"#333",marginLeft:2}}>{expanded?"▲":"▼"}</span>
+        </div>
+      </div>
+      {expanded&&(
+        <div style={{padding:"0 14px 12px",borderTop:`1px solid ${BORDER}`}}>
+          {hasNotes&&<div style={{fontSize:12,color:"#aaa",lineHeight:1.6,marginTop:10,whiteSpace:"pre-wrap"}}>{task.notes}</div>}
+          <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+            <a href={`https://www.youtube.com/results?search_query=${searchQ}`} target="_blank" rel="noopener"
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #FF000033",background:"#1a0000",color:"#FF4444",textDecoration:"none",fontWeight:600}}>▶ YouTube</a>
+            <a href={`https://x.com/search?q=${encodeURIComponent(teamName)}`} target="_blank" rel="noopener"
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #1d9bf033",background:"#001a2a",color:"#1d9bf0",textDecoration:"none",fontWeight:600}}>𝕏 Search</a>
+            <a href={`https://www.instagram.com/explore/tags/${encodeURIComponent(teamName.replace(/\s/g,""))}/`} target="_blank" rel="noopener"
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #E1306C33",background:"#1a001a",color:"#E1306C",textDecoration:"none",fontWeight:600}}>📸 IG</a>
+            <button onClick={()=>navigator.clipboard?.writeText(task.notes||task.title)}
+              style={{fontSize:11,padding:"5px 10px",borderRadius:7,border:"1px solid #333",background:"transparent",color:MUTED,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>📋 Copy</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Phase Section ─────────────────────────────────────────────────────
+function PhaseSection({phase,tasks,brands,teamName,teamColor,defaultOpen=false}){
+  const[open,setOpen]=useState(defaultOpen);
+  const color=phase.color||teamColor;
+  if(!tasks.length)return null;
+
+  const brandMeta=t=>{
+    if(!t.brand)return null;
+    return brands.find(b=>b.label===t.brand)||null;
+  };
+
+  // Group by gameday key within this phase
+  const byKey={};
+  tasks.forEach(t=>{
+    const k=t.gameday;
+    if(!byKey[k])byKey[k]=[];
+    byKey[k].push(t);
+  });
+  const orderedKeys=phase.keys.filter(k=>byKey[k]);
+
+  return(
+    <div style={{marginBottom:16}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,marginBottom:open?10:0,cursor:"pointer",userSelect:"none",padding:"4px 0"}}>
+        <span style={{fontSize:14}}>{phase.icon}</span>
+        <span style={{fontSize:11,fontWeight:800,color,letterSpacing:1.2,textTransform:"uppercase"}}>{phase.label}</span>
+        <div style={{flex:1,height:1,background:color+"33"}}/>
+        <span style={{fontSize:11,color,background:color+"22",borderRadius:99,padding:"2px 8px",fontWeight:700}}>{tasks.length}</span>
+        <span style={{fontSize:11,color:"#333",marginLeft:2}}>{open?"▲":"▼"}</span>
+      </div>
+      {open&&(
+        <div>
+          {orderedKeys.map(k=>(
+            <div key={k}>
+              {orderedKeys.length>1&&<div style={{fontSize:9,fontWeight:700,color:"#333",letterSpacing:1.2,textTransform:"uppercase",padding:"6px 0 4px",marginTop:4}}>{k}</div>}
+              {byKey[k].map(t=><TaskCard key={t.id} task={t} brandMeta={brandMeta(t)} teamName={teamName} accent={brandMeta(t)?null:color} onEdit={()=>{}}/>)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Command Center ────────────────────────────────────────────────────
+function CommandCenter({team,game,allTasks,brands,onBack}){
+  const[activeBrand,setActiveBrand]=useState("all");
+  const[q,setQ]=useState("");
+  const[showSearch,setShowSearch]=useState(false);
+
+  const accent=team.color;
+  const du=game?daysUntil(game.date):null;
+  const gameLabel=game?(du===0?"TODAY":du===1?"TOMORROW":du!==null?`IN ${du} DAYS`:fmtDateShort(game.date)):"No game scheduled";
+
+  // Filter tasks
+  const filtered=useMemo(()=>{
+    let t=allTasks;
+    if(activeBrand!=="all")t=t.filter(x=>x.brand===activeBrand);
+    if(q.trim())t=t.filter(x=>(x.title||"").toLowerCase().includes(q.toLowerCase())||(x.notes||"").toLowerCase().includes(q.toLowerCase()));
+    return t;
+  },[allTasks,activeBrand,q]);
+
+  // Unique brands in these tasks
+  const usedBrands=useMemo(()=>{
+    const set=new Set(allTasks.map(t=>t.brand).filter(Boolean));
+    return [...set].sort();
+  },[allTasks]);
+
+  // Group by phase
+  const phaseData=useMemo(()=>{
+    return PHASES.map(ph=>({
+      ...ph,
+      tasks:filtered.filter(t=>ph.keys.includes(t.gameday))
+    }));
+  },[filtered]);
+
+  const totalTasks=phaseData.reduce((a,p)=>a+p.tasks.length,0);
+
+  return(
+    <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
+      {/* Header */}
+      <div style={{background:"#000",borderBottom:`1px solid ${BORDER}`,flexShrink:0}}>
+        <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={onBack} style={{background:"none",border:"none",color:MUTED,fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px 0 0"}}>‹</button>
+          <span style={{fontSize:22}}>{team.emoji}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:900,fontSize:16,letterSpacing:-.5,color:accent}}>{team.name}</div>
+            <div style={{fontSize:10,color:MUTED,letterSpacing:.5}}>{team.sport}</div>
+          </div>
+          {/* Search toggle */}
+          <button onClick={()=>setShowSearch(s=>!s)} style={{background:showSearch?"#111":"none",border:`1px solid ${showSearch?accent:BORDER}`,borderRadius:8,padding:"6px 11px",cursor:"pointer",color:showSearch?accent:MUTED,fontSize:13,fontFamily:"inherit"}}>🔍</button>
+        </div>
+
+        {/* Game info bar */}
+        {game&&(
+          <div style={{padding:"8px 16px",background:accent+"11",borderTop:`1px solid ${accent}22`,display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:du===0?"#30D158":du===1?"#FF9F0A":accent,flexShrink:0}}/>
+            <div>
+              <span style={{fontSize:12,fontWeight:800,color:du===0?"#30D158":du===1?"#FF9F0A":TEXT}}>{gameLabel}</span>
+              <span style={{fontSize:11,color:MUTED,marginLeft:8}}>{game.opponent?`vs ${game.opponent}`:""}{game.location?" · "+game.location:""}{game.time?" · "+fmtTime12(game.time):""}</span>
+            </div>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:10,color:MUTED}}>{totalTasks} tasks</span>
+          </div>
+        )}
+        {!game&&(
+          <div style={{padding:"6px 16px 8px",display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:11,color:MUTED,fontStyle:"italic"}}>No upcoming game scheduled</span>
+          </div>
+        )}
+
+        {/* Search bar */}
+        {showSearch&&(
+          <div style={{padding:"0 16px 10px"}}>
+            <input autoFocus value={q} onChange={e=>setQ(e.target.value)}
+              placeholder="Search tasks and content…"
+              style={{width:"100%",padding:"8px 12px",borderRadius:9,border:`1px solid ${accent}44`,background:"#111",color:TEXT,outline:"none"}}/>
+          </div>
+        )}
+
+        {/* Brand tabs */}
+        <div style={{display:"flex",overflowX:"auto",scrollbarWidth:"none",borderTop:`1px solid ${BORDER}`,background:"#000"}}>
+          {[{label:"all",display:"ALL",emoji:""},...usedBrands.map(b=>{const bm=brands.find(x=>x.label===b);return{label:b,display:b,emoji:bm?.emoji||""}; })].map(b=>{
+            const active=activeBrand===b.label;
+            return(
+              <button key={b.label} onClick={()=>setActiveBrand(b.label)}
+                style={{padding:"9px 14px",border:"none",borderBottom:active?`2px solid ${accent}`:"2px solid transparent",background:"none",color:active?accent:MUTED,fontFamily:"inherit",fontSize:11,fontWeight:active?700:400,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,transition:"color .15s"}}>
+                {b.emoji&&b.emoji+" "}{b.display}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
+        {totalTasks===0&&(
+          <div style={{textAlign:"center",padding:"64px 0",color:"#222",fontSize:14}}>
+            <div style={{fontSize:36,marginBottom:12}}>{team.emoji}</div>
+            {q?"No matches for your search":"No gameday tasks found — add tasks in Daycrush with a Gameday field set"}
+          </div>
+        )}
+        {phaseData.map((ph,i)=>(
+          <PhaseSection key={ph.id} phase={ph} tasks={ph.tasks} brands={brands} teamName={team.name} teamColor={accent} defaultOpen={i===2||i===1}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Schedule Modal ────────────────────────────────────────────────────
+function ScheduleModal({team,onClose}){
+  const[sched,setSched]=useState(()=>{const s=loadSched();return(s[team.id]||[]).sort((a,b)=>a.date.localeCompare(b.date));});
+  const[form,setForm]=useState({date:"",time:"",opponent:"",location:"home",notes:""});
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  const add=()=>{
+    if(!form.date.trim())return;
+    const g={...form,id:genId()};
+    const updated=[...sched,g].sort((a,b)=>a.date.localeCompare(b.date));
+    setSched(updated);
+    const s=loadSched();s[team.id]=updated;saveSched(s);
+    setForm({date:"",time:"",opponent:"",location:"home",notes:""});
+  };
+  const del=id=>{
+    const updated=sched.filter(g=>g.id!==id);
+    setSched(updated);
+    const s=loadSched();s[team.id]=updated;saveSched(s);
+  };
+
+  const inpS={width:"100%",padding:"9px 11px",borderRadius:8,border:`1px solid #222`,background:"#0d0d0d",color:TEXT,outline:"none",marginBottom:10};
+  const accent=team.color;
+
+  return(
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflow:"auto",border:"1px solid #1e1e1e",borderBottom:"none"}}>
+        <div style={{padding:"16px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:accent}}>{team.emoji} {team.name}</div>
+            <div style={{fontSize:11,color:MUTED}}>Game Schedule</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:MUTED}}>✕</button>
+        </div>
+        <div style={{padding:"0 18px 20px"}}>
+          {/* Add form */}
+          <div style={{background:"#0a0a0a",borderRadius:10,border:`1px solid #1a1a1a`,padding:"12px 14px",marginBottom:16}}>
+            <div style={{fontSize:10,fontWeight:700,color:MUTED,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Add Game</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Date *</div>
+                <input type="date" value={form.date} onChange={e=>set("date",e.target.value)} style={{...inpS,colorScheme:"dark",marginBottom:0}}/>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Time</div>
+                <input type="time" value={form.time} onChange={e=>set("time",e.target.value)} style={{...inpS,colorScheme:"dark",marginBottom:0}}/>
+              </div>
+            </div>
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Opponent</div>
+              <input value={form.opponent} onChange={e=>set("opponent",e.target.value)} placeholder="e.g. Pittsburgh Pirates" style={{...inpS,marginBottom:0}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+              <div>
+                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Location</div>
+                <select value={form.location} onChange={e=>set("location",e.target.value)} style={{...inpS,marginBottom:0,cursor:"pointer"}}>
+                  <option value="home">🏠 Home</option>
+                  <option value="away">✈️ Away</option>
+                  <option value="neutral">⚪ Neutral</option>
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:MUTED,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>Notes</div>
+                <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional" style={{...inpS,marginBottom:0}}/>
+              </div>
+            </div>
+            <button onClick={add} style={{width:"100%",marginTop:10,padding:"10px",borderRadius:9,border:"none",background:form.date?accent:"#222",color:form.date?"#fff":MUTED,fontWeight:800,fontFamily:"inherit",fontSize:13,cursor:form.date?"pointer":"default"}}>Add Game</button>
+          </div>
+
+          {/* Game list */}
+          {sched.length===0&&<div style={{textAlign:"center",padding:"24px 0",color:"#333",fontSize:13,fontStyle:"italic"}}>No games scheduled</div>}
+          {sched.map(g=>{
+            const du=daysUntil(g.date);
+            const past=du!==null&&du<0;
+            return(
+              <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:9,background:"#0d0d0d",border:`1px solid ${!past&&du===0?accent+"44":BORDER}`,marginBottom:6,opacity:past?.5:1}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:past?MUTED:TEXT}}>{fmtDateShort(g.date)}{g.time&&<span style={{color:MUTED,fontWeight:400}}> · {fmtTime12(g.time)}</span>}</div>
+                  <div style={{fontSize:11,color:MUTED,marginTop:2}}>{g.opponent?"vs "+g.opponent:""}{g.location?" · "+(g.location==="home"?"🏠 Home":g.location==="away"?"✈️ Away":"⚪ Neutral"):""}{g.notes?" · "+g.notes:""}</div>
+                </div>
+                {!past&&du===0&&<span style={{fontSize:10,fontWeight:700,color:"#30D158",background:"#30D15822",borderRadius:5,padding:"2px 7px"}}>TODAY</span>}
+                {!past&&du===1&&<span style={{fontSize:10,fontWeight:700,color:"#FF9F0A",background:"#FF9F0A22",borderRadius:5,padding:"2px 7px"}}>TOMORROW</span>}
+                {!past&&du!==null&&du>1&&<span style={{fontSize:10,color:MUTED}}>in {du}d</span>}
+                <button onClick={()=>del(g.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#FF453A44",fontSize:16,lineHeight:1,padding:"2px 4px",transition:"color .15s"}} onMouseEnter={e=>e.currentTarget.style.color="#FF453A"} onMouseLeave={e=>e.currentTarget.style.color="#FF453A44"}>×</button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Team Card ─────────────────────────────────────────────────────────
+function TeamCard({team,taskCount,onGo,onSchedule}){
+  const game=nextGame(team.id);
+  const du=game?daysUntil(game.date):null;
+  const accent=team.color;
+  const isToday=du===0;
+  const isTomorrow=du===1;
+
+  return(
+    <div style={{background:"#0a0a0a",borderRadius:14,border:`1px solid ${isToday?accent+"66":BORDER}`,overflow:"hidden",boxShadow:isToday?`0 0 20px ${accent}22`:"none",transition:"border-color .2s"}}>
+      {/* Team header */}
+      <div style={{background:accent+"11",borderBottom:`1px solid ${accent}22`,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:26,lineHeight:1}}>{team.emoji}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:800,fontSize:14,color:accent,letterSpacing:-.3,lineHeight:1.2}}>{team.name}</div>
+          <div style={{fontSize:10,color:MUTED,letterSpacing:1,marginTop:2}}>{team.sport}</div>
+        </div>
+        {isToday&&<span style={{fontSize:10,fontWeight:800,color:"#30D158",background:"#30D15822",borderRadius:5,padding:"3px 8px",letterSpacing:.5}}>LIVE</span>}
+      </div>
+
+      {/* Next game */}
+      <div style={{padding:"10px 14px"}}>
+        {game?(
+          <>
+            <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase",marginBottom:4}}>Next Game</div>
+            <div style={{fontSize:13,fontWeight:700,color:isToday?"#30D158":isTomorrow?"#FF9F0A":TEXT}}>{isToday?"Today!":isTomorrow?"Tomorrow":fmtDateShort(game.date)}</div>
+            <div style={{fontSize:11,color:MUTED,marginTop:2}}>{game.opponent?"vs "+game.opponent:""}{game.time?" · "+fmtTime12(game.time):""}{game.location?" · "+(game.location==="home"?"Home":"Away"):""}</div>
+          </>
+        ):(
+          <div style={{fontSize:11,color:"#333",fontStyle:"italic"}}>No game scheduled</div>
+        )}
+      </div>
+
+      {/* Task count + actions */}
+      <div style={{padding:"8px 14px 12px",display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:10,color:"#333"}}>{taskCount} task{taskCount!==1?"s":""}</span>
+        <div style={{flex:1}}/>
+        <button onClick={onSchedule} style={{padding:"7px 12px",borderRadius:8,border:`1px solid ${BORDER}`,background:"transparent",color:MUTED,fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>📅 Schedule</button>
+        <button onClick={onGo} style={{padding:"7px 16px",borderRadius:8,border:"none",background:accent,color:"#fff",fontSize:12,fontWeight:800,fontFamily:"inherit",cursor:"pointer"}}>GO LIVE</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Home Screen ───────────────────────────────────────────────────────
+function HomeScreen({user,allTasks,brands,onGo,onSignOut}){
+  const[schedTeam,setSchedTeam]=useState(null);
+  const[tick,setTick]=useState(0); // force re-render after schedule changes
+
+  const taskCountByTeam=()=>{
+    // All gameday tasks are relevant to all teams (they're content templates)
+    // Just show total
+    return allTasks.length;
+  };
+
+  return(
+    <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#000"}}>
+      {/* Header */}
+      <div style={{padding:"14px 16px 12px",borderBottom:`1px solid ${BORDER}`,display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:900,fontSize:20,letterSpacing:-1}}>GAMEDAY</div>
+          <div style={{fontSize:9,color:"#FF6B00",letterSpacing:3,fontWeight:700,textTransform:"uppercase",marginTop:2}}>Command Center</div>
+        </div>
+        <div style={{fontSize:10,color:"#333"}}>{allTasks.length} tasks across {PHASES.length} phases</div>
+        <button onClick={onSignOut} style={{background:"none",border:`1px solid ${BORDER}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:MUTED,fontSize:11,fontFamily:"inherit"}}>sign out</button>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"16px 16px 40px"}}>
+        {/* Today's games banner */}
+        {TEAMS.some(t=>{const g=nextGame(t.id);return g&&daysUntil(g.date)===0;})&&(
+          <div style={{background:"#0a1a0a",border:"1px solid #30D15833",borderRadius:12,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:"#30D158",animation:"spin .8s linear infinite"}}/>
+            <span style={{fontSize:12,fontWeight:700,color:"#30D158"}}>Games Today:</span>
+            <span style={{fontSize:12,color:"#30D158"}}>{TEAMS.filter(t=>{const g=nextGame(t.id);return g&&daysUntil(g.date)===0;}).map(t=>t.short).join(", ")}</span>
+          </div>
+        )}
+
+        {/* Team grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:12}}>
+          {TEAMS.map(team=>(
+            <TeamCard key={team.id} team={team} taskCount={allTasks.length}
+              onGo={()=>onGo(team)}
+              onSchedule={()=>setSchedTeam(team)}/>
+          ))}
+        </div>
+
+        {/* Quick stats */}
+        <div style={{marginTop:24,display:"flex",gap:10,flexWrap:"wrap"}}>
+          {PHASES.map(ph=>{
+            const count=allTasks.filter(t=>ph.keys.includes(t.gameday)).length;
+            if(!count)return null;
+            const color=ph.color||"#FF6B00";
+            return(
+              <div key={ph.id} style={{background:"#0a0a0a",border:`1px solid ${color}22`,borderRadius:9,padding:"8px 14px",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13}}>{ph.icon}</span>
+                <div>
+                  <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase"}}>{ph.label}</div>
+                  <div style={{fontSize:16,fontWeight:800,color}}>{count}</div>
+                </div>
+              </div>
+            );
+          })}
+          {brands.length>0&&(
+            <div style={{background:"#0a0a0a",border:`1px solid #333`,borderRadius:9,padding:"8px 14px",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13}}>🏷</span>
+              <div>
+                <div style={{fontSize:10,color:MUTED,letterSpacing:.5,textTransform:"uppercase"}}>Brands</div>
+                <div style={{fontSize:16,fontWeight:800,color:TEXT}}>{brands.length}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {schedTeam&&<ScheduleModal team={schedTeam} onClose={()=>{setSchedTeam(null);setTick(t=>t+1);}}/>}
+    </div>
+  );
+}
+
+// ── Root ──────────────────────────────────────────────────────────────
+function App(){
+  const[screen,setScreen]=useState("loading");
+  const[user,setUser]=useState(null);
+  const[allTasks,setAllTasks]=useState([]);
+  const[brands,setBrands]=useState([]);
+  const[activeTeam,setActiveTeam]=useState(null);
+
+  const load=async u=>{
+    const{tasks,brands}=await loadAllData(u.id);
+    setAllTasks(tasks);setBrands(brands);
+    setScreen("home");
+  };
+
+  useEffect(()=>{
+    db.auth.getSession().then(({data:{session}})=>{
+      if(session){setUser(session.user);load(session.user);}
+      else setScreen("auth");
+    });
+    const{data:{subscription}}=db.auth.onAuthStateChange((_,session)=>{
+      if(!session){setUser(null);setScreen("auth");}
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
+
+  const signOut=()=>db.auth.signOut();
+
+  if(screen==="loading")return(
+    <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,background:"#000"}}>
+      <div style={{fontWeight:900,fontSize:24,letterSpacing:-1}}>GAMEDAY</div>
+      <div className="spin" style={{width:22,height:22,border:"2px solid #1a1a1a",borderTopColor:"#FF6B00",borderRadius:"50%"}}/>
+    </div>
+  );
+
+  if(screen==="auth")return<AuthScreen onAuth={u=>{setUser(u);load(u);}}/>;
+
+  if(screen==="home")return(
+    <>
+      <HomeScreen user={user} allTasks={allTasks} brands={brands}
+        onGo={team=>{setActiveTeam(team);setScreen("center");}}
+        onSignOut={signOut}/>
+    </>
+  );
+
+  if(screen==="center"&&activeTeam)return(
+    <CommandCenter
+      team={activeTeam}
+      game={nextGame(activeTeam.id)}
+      allTasks={allTasks}
+      brands={brands}
+      onBack={()=>{setScreen("home");setActiveTeam(null);}}/>
+  );
+
+  return null;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
